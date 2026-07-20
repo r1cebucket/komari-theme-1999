@@ -7,6 +7,10 @@
     "package": "./build-theme.sh",
     "clean": "rm -rf dist"
   },
-  "author": "Komari Theme",
+  "author": {
+    "name": "ricebucket",
+    "email": "ricebucket.mail@gmail.com",
+    "url": "https://github.com/r1cebucket"
+  },
   "license": "MIT"
 }
