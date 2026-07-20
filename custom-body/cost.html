@@ -1,0 +1,245 @@
+<style>
+/* --- 汇总卡片：新酷派风格重塑 --- */
+.komari-summary-card {
+  margin: 0 0 24px 0;
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  /* 核心：粗边框与硬阴影 */
+  background: var(--white);
+  border: var(--border-width) solid var(--black);
+  box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--black);
+  position: relative;
+  transition: transform 0.1s ease;
+}
+
+.komari-summary-card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: calc(var(--shadow-offset) + 2px) calc(var(--shadow-offset) + 2px) 0 var(--black);
+}
+
+.komari-summary-card .kmc-title {
+  font-family: 'Archivo Black', sans-serif;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 6px;
+  color: var(--black);
+  display: block;
+}
+
+.komari-summary-card .kmc-total {
+  font-family: 'Archivo Black', sans-serif;
+  font-size: 1.8rem;
+  line-height: 1;
+  color: var(--black);
+  text-shadow: 1px 1px 0 var(--white);
+}
+
+.komari-summary-card .kmc-divider {
+  width: 4px;
+  height: 48px;
+  background: var(--black);
+  flex-shrink: 0;
+}
+
+.komari-summary-card .kmc-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+}
+
+/* --- 标签：贴纸/印章风格 --- */
+.komari-summary-card .kmc-item-blue,
+.komari-summary-card .kmc-item-red {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  font-family: 'SF Mono', 'Space Mono', monospace;
+  font-weight: 900;
+  font-size: 12px;
+  border: 2px solid var(--black);
+  box-shadow: 3px 3px 0 var(--black);
+  color: var(--black);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.komari-summary-card .kmc-item-blue {
+  background: var(--accent-blue);
+}
+
+.komari-summary-card .kmc-item-red {
+  background: var(--accent-red);
+}
+
+.komari-summary-card .kmc-meta {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-left: auto;
+  text-align: right;
+}
+
+/* 适配移动端 */
+@media (max-width: 768px) {
+  .komari-summary-card {
+    gap: 16px;
+    padding: 15px;
+  }
+  .komari-summary-card .kmc-divider {
+    display: none;
+  }
+  .komari-summary-card .kmc-total {
+    font-size: 1.4rem;
+  }
+}
+</style>
+
+<script>
+(function () {
+  // 保持原有逻辑，仅优化 buildCard 相关的 HTML 结构以匹配新样式
+  function escapeHTML(str) {
+    if (!str) return '';
+    return String(str).replace(/[&<>'"]/g, tag => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+    }[tag] || tag));
+  }
+
+  const SYMBOL_TO_CODE = {
+    '$': 'USD', '€': 'EUR', '¥': 'CNY', 'CN¥': 'CNY', 'RMB': 'CNY',
+    'JP¥': 'JPY', 'JPY': 'JPY', 'HK$': 'HKD', 'CA$': 'CAD', 'C$': 'CAD', '£': 'GBP',
+  };
+
+  let allNodes = null, ratesData = null, observerActive = false, lastTabName = null;
+
+  async function fetchRates() {
+    try {
+      const res = await fetch('https://api.frankfurter.app/latest?from=CNY&to=USD,EUR,HKD,CAD,GBP,JPY');
+      const json = await res.json();
+      const rates = { CNY: 1 };
+      for (const [code, val] of Object.entries(json.rates)) { rates[code] = 1 / val; }
+      return rates;
+    } catch (e) {
+      return { CNY: 1, USD: 7.2, EUR: 7.8, HKD: 0.9, CAD: 5.3, GBP: 9.1, JPY: 0.048 };
+    }
+  }
+
+  async function fetchNodes() {
+    const res = await fetch('/api/nodes');
+    const json = await res.json();
+    return json.data;
+  }
+
+  function toCNY(amount, symbol, rates) {
+    const code = SYMBOL_TO_CODE[(symbol || '$').trim()] || 'USD';
+    return amount * (rates[code] || 1);
+  }
+
+  function findInsertTarget() {
+    const grid = document.querySelector('.nodes-container');
+    return grid || document.querySelector('.node-card')?.parentElement;
+  }
+
+  function buildMonthlyCard(nodes, updateTime, tabName) {
+    let totalCNY = 0;
+    const grouped = {};
+    nodes.forEach(n => {
+      if (!n.price || n.price <= 0) return;
+      const symbol = (n.currency || '$').trim();
+      const code = SYMBOL_TO_CODE[symbol] || 'USD';
+      const monthly = (n.price / (n.billing_cycle || 30)) * 30;
+      const cny = toCNY(monthly, symbol, ratesData);
+      totalCNY += cny;
+      if (!grouped[code]) grouped[code] = { symbol, monthly: 0, cny: 0 };
+      grouped[code].monthly += monthly;
+      grouped[code].cny += cny;
+    });
+
+    const breakdownHTML = Object.entries(grouped).map(([, info]) =>
+      `<span class="kmc-item-blue">${info.symbol}${info.monthly.toFixed(2)}</span>`
+    ).join('');
+    
+    const card = document.createElement('div');
+    card.id = 'komari-card-monthly';
+    card.className = 'komari-summary-card';
+    card.innerHTML = `
+      <div>
+        <span class="kmc-title">COST / MONTH</span>
+        <div class="kmc-total">¥${totalCNY.toFixed(2)}</div>
+      </div>
+      <div class="kmc-divider"></div>
+      <div class="kmc-breakdown">${breakdownHTML || '<span style="font-size:12px;font-weight:700;">NO DATA</span>'}</div>
+      <div class="kmc-meta">EXCHANGE RATE: ${updateTime}</div>
+    `;
+    return card;
+  }
+
+  function buildResidualCard(nodes, tabName) {
+    let totalCNY = 0;
+    const expiringSoon = [];
+    const now = Date.now();
+    nodes.forEach(n => {
+      if (!n.price || n.price <= 0) return;
+      const expireTs = new Date(n.expired_at).getTime();
+      if (isNaN(expireTs) || expireTs <= now) return;
+      const remainDays = (expireTs - now) / 86400000;
+      const dailyPrice = n.price / (n.billing_cycle || 30);
+      totalCNY += toCNY(dailyPrice * remainDays, n.currency || '$', ratesData);
+      if (remainDays <= 7) expiringSoon.push({ name: n.name, days: Math.ceil(remainDays) });
+    });
+
+    const warningHTML = expiringSoon.map(n =>
+      `<span class="kmc-item-red">! ${escapeHTML(n.name)} (${n.days}d)</span>`
+    ).join('');
+    
+    const card = document.createElement('div');
+    card.id = 'komari-card-residual';
+    card.className = 'komari-summary-card';
+    card.innerHTML = `
+      <div>
+        <span class="kmc-title">RESIDUAL VALUE</span>
+        <div class="kmc-total">¥${totalCNY.toFixed(2)}</div>
+      </div>
+      <div class="kmc-divider"></div>
+      <div class="kmc-breakdown">
+        ${expiringSoon.length > 0 ? warningHTML : '<span style="font-size:12px;font-weight:700;">ALL CLEAR ✓</span>'}
+      </div>
+    `;
+    return card;
+  }
+
+  function injectCards() {
+    const target = findInsertTarget();
+    if (!target || !allNodes) return;
+    const existing = document.getElementById('komari-card-monthly');
+    if (existing) return;
+
+    const now = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    const monthlyCard = buildMonthlyCard(allNodes, now, 'ALL');
+    const residualCard = buildResidualCard(allNodes, 'ALL');
+
+    target.parentNode.insertBefore(monthlyCard, target);
+    target.parentNode.insertBefore(residualCard, target);
+  }
+
+  async function init() {
+    try {
+      const [nodes, rates] = await Promise.all([fetchNodes(), fetchRates()]);
+      allNodes = nodes; ratesData = rates;
+      injectCards();
+      // 监听容器变化重新注入
+      new MutationObserver(() => injectCards()).observe(document.body, { childList: true, subtree: true });
+    } catch (e) {}
+  }
+
+  init();
+})();
+</script>

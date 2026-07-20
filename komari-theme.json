@@ -1,0 +1,32 @@
+{
+  "name": "Komari Theme - 1999",
+  "short": "komari-1999",
+  "description": "Neo-Brutalism themed dashboard for Komari Monitor",
+  "version": "1.0.0",
+  "author": "Komari Theme",
+  "managedConfig": [
+    {
+      "name": "Accent Color",
+      "key": "accentColor",
+      "type": "select",
+      "help": "Primary accent color for the theme",
+      "options": ["yellow", "red", "blue", "green", "purple"],
+      "default": "yellow"
+    },
+    {
+      "name": "Card Style",
+      "key": "cardStyle",
+      "type": "select",
+      "help": "Border style for cards",
+      "options": ["thick", "thin", "double"],
+      "default": "thick"
+    },
+    {
+      "name": "Show Uptime",
+      "key": "showUptime",
+      "type": "switch",
+      "help": "Display uptime on node cards",
+      "default": true
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+name: Build CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build and package theme
+        run: npm run package
+
+      - name: Upload theme package
+        uses: actions/upload-artifact@v4
+        with:
+          name: komari-theme-1999-${{ github.sha }}
+          path: komari-theme-v*.zip
+          if-no-files-found: error
+          compression-level: 0

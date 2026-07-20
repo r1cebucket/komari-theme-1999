@@ -1,0 +1,12 @@
+{
+  "name": "komari-theme-1999",
+  "version": "1.0.0",
+  "description": "Neo-Brutalism themed dashboard for Komari Monitor",
+  "scripts": {
+    "build": "mkdir -p dist && cp src/index.html src/styles.css src/script.js dist/",
+    "package": "./build-theme.sh",
+    "clean": "rm -rf dist"
+  },
+  "author": "Komari Theme",
+  "license": "MIT"
+}

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.zip
+*.log
+.DS_Store
+.env
+
+# Local AI coding assistants
+.claude/
+.codex/
+.agents/
+CLAUDE.md
+AGENTS.md
