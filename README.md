@@ -68,7 +68,7 @@ Keep the versions in `package.json` and `komari-theme.json` synchronized before 
 
 ## CI
 
-`.github/workflows/build-ci.yml` runs for pushes and pull requests targeting `main`, and can also be started manually. It packages the theme with Node.js 20 and uploads `komari-theme-v*.zip` as a GitHub Actions artifact.
+`.github/workflows/build-ci.yml` runs for pushes and pull requests targeting `main`, and can also be started manually. It builds the theme with Node.js 24 and uploads `komari-theme.json` plus `dist/` as a GitHub Actions artifact. The downloaded artifact ZIP can be uploaded directly to Komari.
 
 ## Komari Compatibility
 
