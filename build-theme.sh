@@ -8,6 +8,13 @@ echo "Building $OUTPUT..."
 
 npm run build
 
-zip -r "$OUTPUT" komari-theme.json dist/
+rm -f "$OUTPUT"
+
+# Pack root-level files first (flat) so the names sit at zip root.
+zip -j -X "$OUTPUT" komari-theme.json
+zip -j -X "$OUTPUT" static/cover-image.png
+
+# Pack the compiled output under dist/.
+zip -r -X "$OUTPUT" dist
 
 echo "Created: $OUTPUT"

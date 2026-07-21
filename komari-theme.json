@@ -1,9 +1,11 @@
 {
-  "name": "Komari Theme - 1999",
+  "name": "Komari 1999",
   "short": "komari-1999",
   "description": "Neo-Brutalism themed dashboard for Komari Monitor",
   "version": "1.0.0",
-  "author": "Komari Theme",
+  "author": "ricebucket",
+  "url": "https://github.com/r1cebucket/komari-theme-1999",
+  "preview": "cover-image.png",
   "managedConfig": [
     {
       "name": "Accent Color",

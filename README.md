@@ -2,6 +2,11 @@
 
 A neo-brutalist monitoring dashboard for [Komari Monitor](https://github.com/komari-monitor/komari), featuring heavy borders, hard shadows, pixel-inspired loading states, and responsive node detail charts.
 
+
+## Preview
+
+![cover](./static/cover-image.png)
+
 ## Features
 
 - Responsive grid and list views with persistent view preference
@@ -47,6 +52,7 @@ src/
 ├── styles.css       # Theme, responsive, modal, and animation styles
 └── script.js        # RPC data, rendering, preferences, and ECharts logic
 custom-body/         # Optional Komari custom-body snippets
+static/              # Theme cover image (`cover-image.png`) included in the packaged ZIP
 komari-theme.json    # Theme metadata and managed settings
 build-theme.sh       # ZIP packaging script
 .github/workflows/   # CI build and artifact upload
