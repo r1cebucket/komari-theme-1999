@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "ricebucket",
   "url": "https://github.com/r1cebucket/komari-theme-1999",
-  "preview": "cover-image.png",
+  "preview": "./static/cover-image.png",
   "managedConfig": [
     {
       "name": "Accent Color",
