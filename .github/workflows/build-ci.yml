@@ -29,15 +29,16 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Build theme
-        run: npm run build
+      - name: Build theme package
+        run: npm run package
 
-      - name: Upload theme package
+      - name: Inspect zip contents
+        run: unzip -l komari-theme-v*.zip
+
+      - name: Upload zip artifact
         uses: actions/upload-artifact@v7
         with:
           name: komari-theme-1999-${{ github.sha }}
-          path: |
-            komari-theme.json
-            dist/
+          path: komari-theme-v*.zip
           if-no-files-found: error
           compression-level: 9
