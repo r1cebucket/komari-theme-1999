@@ -1310,6 +1310,109 @@ h1, h2, h3, h4, h5, h6 {
   border: none;
 }
 
+.modal-latency-tasks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  align-items: start;
+}
+
+.latency-task-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 3px solid var(--black);
+  box-shadow: 3px 3px 0 var(--black);
+  min-width: 0;
+}
+
+.latency-task-row {
+  display: flex;
+  flex: 0 0 auto;
+  transition: opacity 0.18s ease;
+}
+
+.latency-task-strip {
+  width: 6px;
+  background: var(--task-color, var(--accent-yellow));
+  flex-shrink: 0;
+}
+
+.latency-task-body {
+  padding: 0.5rem 0.75rem 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.latency-task-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.25rem;
+}
+
+.latency-task-name {
+  font-weight: 700;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.latency-task-stats {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+
+.latency-task-latest {
+  font-family: 'SF Mono', monospace;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.latency-task-sep {
+  color: var(--text-muted);
+}
+
+.latency-task-loss {
+  font-family: 'SF Mono', monospace;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.latency-task-loss.has-loss {
+  color: var(--accent-red);
+}
+
+.latency-task-detail-wrap {
+  display: none;
+}
+
+.latency-task-detail {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem 0.75rem;
+
+  padding: 0.5rem 0.75rem;
+  background: var(--black);
+  color: var(--white);
+  font-size: 0.85rem;
+}
+
+.latency-task-detail .info-label,
+.latency-task-detail .info-value {
+  color: var(--white);
+}
+
 .modal-latency-header .modal-section-title {
   border-bottom: none;
   margin-bottom: 0;
