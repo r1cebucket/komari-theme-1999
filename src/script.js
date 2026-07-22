@@ -32,6 +32,8 @@
 
   let requestId = 0;
 
+  const PING_COLORS = ['#FF3333', '#00A896', '#9B5DE5', '#0066FF', '#F59E0B', '#EC4899', '#10B981', '#F97316'];
+
   // Helper: only scramble changed characters
   function scrambleTextIfChanged(element, finalText) {
     const prevText = element.dataset.prev || '';
@@ -102,6 +104,16 @@
   function formatPing(ms) {
     if (ms == null || ms < 0) return '-';
     return ms.toFixed(1) + ' ms';
+  }
+
+  function escapeHtml(value) {
+    if (value == null) return '';
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   function getPingClass(ms) {
@@ -871,6 +883,7 @@
             <button class="btn-timescale" data-hours="24">24H</button>
           </div>
         </div>
+        <div class="modal-latency-tasks" id="modal-latency-tasks"></div>
         <div id="chart-ping" class="chart-container"></div>
       </section>
     `;
@@ -1142,12 +1155,114 @@
 
   }
 
+  function computeTaskStats(pingRecords, pingTasks) {
+    const nameById = {};
+    (pingTasks || []).forEach(task => { nameById[task.id] = task.name; });
+
+    const grouped = new Map();
+    (pingRecords || []).forEach(record => {
+      const taskId = record.task_id ?? 'Default';
+      const timestamp = parseRecordTime(record.time ?? record.updated_at);
+      if (timestamp == null) return;
+      if (!grouped.has(taskId)) grouped.set(taskId, []);
+      grouped.get(taskId).push({ timestamp, value: record.value });
+    });
+
+    const order = [];
+    (pingTasks || []).forEach(task => { if (grouped.has(task.id) && !order.includes(task.id)) order.push(task.id); });
+    grouped.forEach((_, id) => { if (!order.includes(id)) order.push(id); });
+
+    return order.map(taskId => {
+      const recs = grouped.get(taskId).slice().sort((a, b) => a.timestamp - b.timestamp);
+      const total = recs.length;
+      const lossCount = recs.filter(r => typeof r.value === 'number' && r.value < 0).length;
+      const loss = total > 0 ? (lossCount / total) * 100 : 0;
+      const latestRecord = recs[recs.length - 1];
+      const latestRaw = latestRecord ? latestRecord.value : null;
+      const latest = typeof latestRaw === 'number' && latestRaw >= 0 ? latestRaw : null;
+
+      const validValues = recs
+        .map(r => r.value)
+        .filter(v => typeof v === 'number' && v >= 0);
+
+      const stats = validValues.length ? {
+        min: Math.min(...validValues),
+        max: Math.max(...validValues),
+        avg: validValues.reduce((sum, v) => sum + v, 0) / validValues.length,
+        p50: percentile(validValues, 50),
+        p99: percentile(validValues, 99),
+      } : { min: null, max: null, avg: null, p50: null, p99: null };
+
+      return {
+        id: taskId,
+        name: nameById[taskId] || (taskId === 'Default' ? 'Ping' : `Task ${taskId}`),
+        latest,
+        loss,
+        ...stats,
+        total
+      };
+    });
+  }
+
+  function percentile(values, p) {
+    if (!values.length) return null;
+    const sorted = values.slice().sort((a, b) => a - b);
+    const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor((p / 100) * sorted.length)));
+    return sorted[idx];
+  }
+
+  function renderLatencyTasks(stats) {
+    const container = document.getElementById('modal-latency-tasks');
+    if (!container) return;
+    if (!stats.length) { container.innerHTML = ''; return; }
+
+    container.innerHTML = stats.map((task, index) => {
+      const color = PING_COLORS[index % PING_COLORS.length];
+      const lossText = `${task.loss.toFixed(1)}% LOSS`;
+      const lossClass = task.loss > 0 ? 'has-loss' : '';
+      const latestText = formatPing(task.latest);
+      const detailRows = [];
+      if (task.min != null) detailRows.push(['MIN', `${task.min.toFixed(0)} ms`]);
+      if (task.avg != null) detailRows.push(['AVG', `${task.avg.toFixed(0)} ms`]);
+      if (task.max != null) detailRows.push(['MAX', `${task.max.toFixed(0)} ms`]);
+      if (task.p50 != null) detailRows.push(['P50', `${task.p50.toFixed(0)} ms`]);
+      if (task.p99 != null) detailRows.push(['P99', `${task.p99.toFixed(0)} ms`]);
+      const detailHtml = detailRows.length
+        ? `<div class="latency-task-detail-wrap"><div class="latency-task-detail">${detailRows.map(([k, v]) =>
+            `<div class="info-item"><span class="info-label">${k}</span><span class="info-value">${escapeHtml(v)}</span></div>`
+          ).join('')}</div></div>`
+        : '';
+
+      return `
+        <div class="latency-task-card" style="--task-color: ${color};">
+          <div class="latency-task-row">
+            <div class="latency-task-strip"></div>
+            <div class="latency-task-body">
+              <div class="latency-task-header">
+                <span class="latency-task-name" title="${escapeHtml(task.name)}">${escapeHtml(task.name)}</span>
+              </div>
+              <div class="latency-task-stats">
+                <span class="latency-task-latest">${escapeHtml(latestText)}</span>
+                <span class="latency-task-sep">·</span>
+                <span class="latency-task-loss ${lossClass}">${escapeHtml(lossText)}</span>
+              </div>
+            </div>
+          </div>
+          ${detailHtml}
+        </div>
+      `;
+    }).join('');
+  }
+
   function renderLatencyChart(pingRecords, pingTasks) {
     disposeChart('ping');
     if (typeof echarts === 'undefined') return;
 
-    const taskMap = {};
-    (pingTasks || []).forEach(task => { taskMap[task.id] = task.name; });
+    const stats = computeTaskStats(pingRecords, pingTasks);
+    renderLatencyTasks(stats);
+
+    const nameById = {};
+    (pingTasks || []).forEach(task => { nameById[task.id] = task.name; });
     const pingGroups = {};
     (pingRecords || []).forEach(record => {
       const taskId = record.task_id || 'Default';
@@ -1155,17 +1270,17 @@
       if (timestamp == null) return;
       if (!pingGroups[taskId]) {
         pingGroups[taskId] = {
-          name: taskMap[record.task_id] || (taskId === 'Default' ? 'Ping' : `Task ${taskId}`),
+          name: nameById[record.task_id] || (taskId === 'Default' ? 'Ping' : `Task ${taskId}`),
           data: []
         };
       }
-      pingGroups[taskId].data.push([timestamp, record.value ?? 0]);
+      const value = (record.value == null || record.value < 0) ? null : record.value;
+      pingGroups[taskId].data.push([timestamp, value]);
     });
 
-    const pingColors = ['#FF3333', '#00A896', '#9B5DE5', '#0066FF', '#F59E0B', '#EC4899', '#10B981', '#F97316'];
     const pingSeries = Object.keys(pingGroups).map((taskId, index) => createSeries(
       pingGroups[taskId].name,
-      pingColors[index % pingColors.length],
+      PING_COLORS[index % PING_COLORS.length],
       pingGroups[taskId].data.sort((a, b) => a[0] - b[0]),
       0.08
     ));
