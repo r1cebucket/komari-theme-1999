@@ -1806,6 +1806,15 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 @media (max-width: 600px) {
+  .modal-node-header {
+    padding-right: 3.5rem;
+  }
+
+  .modal-node-title {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
   .modal-load-title-container,
   .modal-latency-header {
     flex-direction: column;
