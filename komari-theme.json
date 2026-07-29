@@ -2,7 +2,7 @@
   "name": "Komari 1999",
   "short": "komari-1999",
   "description": "Neo-Brutalism themed dashboard for Komari Monitor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "ricebucket",
   "url": "https://github.com/r1cebucket/komari-theme-1999",
   "preview": "./static/cover-image.png",

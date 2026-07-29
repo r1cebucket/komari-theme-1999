@@ -625,6 +625,165 @@
     if (uptime) scrambleTextIfChanged(uptime, newUptimeText);
   }
 
+  function createNodeListItem(node) {
+    const cpu = node.cpu || 0;
+    const ramPct = node.ram_total ? getPercentage(node.ram, node.ram_total) : 0;
+    const diskPct = node.disk_total ? getPercentage(node.disk, node.disk_total) : 0;
+    const isOnline = node.online !== false && node.name !== undefined;
+
+    const cpuText = `${cpu.toFixed(1)}%`;
+    const ramText = `${formatBytes(node.ram || 0)} / ${formatBytes(node.ram_total || 0)}`;
+    const diskText = `${formatBytes(node.disk || 0)} / ${formatBytes(node.disk_total || 0)}`;
+    const netTotal = node.traffic_limit > 0 ? getNetTotalByType(node) : (node.net_total_up || 0) + (node.net_total_down || 0);
+    const netTotalText = formatBytes(netTotal) + (node.traffic_limit ? ' / ' + formatBytes(node.traffic_limit) : '');
+    const { upPct, downPct, upDim, downDim, upHide, downHide, upLeft, downLeft, upZIndex, downZIndex } = getNetBarWidths(node);
+
+    const downSpeedText = isOnline ? `${formatNetworkSpeed(node.net_in || 0)}` : '-';
+    const upSpeedText = isOnline ? `${formatNetworkSpeed(node.net_out || 0)}` : '-';
+    const uptimeText = isOnline ? formatUptime(node.uptime) : '-';
+
+    const row = document.createElement('div');
+    row.className = `node-row${isOnline ? '' : ' offline'}`;
+    row.dataset.uuid = node.uuid;
+    row.style.cursor = 'pointer';
+
+    row.innerHTML = `
+      <div class="row-head">
+        <div class="row-status${isOnline ? '' : ' offline'}"></div>
+        <div class="row-name">
+          <div class="row-node-name">${escapeHtml(node.name || 'Unknown')}</div>
+          <div class="row-node-info">${escapeHtml(node.os || '')}${node.cpu_name ? ' · ' + escapeHtml(node.cpu_name) : ''}</div>
+        </div>
+        <div class="row-uptime">
+          <span class="row-uptime-label">UPTIME</span>
+          <span class="row-uptime-value" data-prev="${uptimeText}">${uptimeText}</span>
+        </div>
+      </div>
+      <div class="row-metrics">
+        <div class="row-metric row-cpu">
+          <div class="row-metric-header">
+            <span class="row-metric-label">CPU</span>
+            <span class="row-metric-value" data-prev="${cpuText}">${cpuText}</span>
+          </div>
+          <div class="row-metric-bar"><div class="row-fill ${getMetricClass(cpu)}" style="width: ${Math.min(cpu, 100)}%"></div></div>
+        </div>
+        <div class="row-metric row-ram">
+          <div class="row-metric-header">
+            <span class="row-metric-label">RAM</span>
+            <span class="row-metric-value" data-prev="${ramText}">${ramText}</span>
+          </div>
+          <div class="row-metric-bar"><div class="row-fill ${getMetricClass(ramPct)}" style="width: ${ramPct}%"></div></div>
+        </div>
+        <div class="row-metric row-disk">
+          <div class="row-metric-header">
+            <span class="row-metric-label">DISK</span>
+            <span class="row-metric-value" data-prev="${diskText}">${diskText}</span>
+          </div>
+          <div class="row-metric-bar"><div class="row-fill ${getMetricClass(diskPct)}" style="width: ${diskPct}%"></div></div>
+        </div>
+        <div class="row-metric row-net">
+          <div class="row-metric-header">
+            <span class="row-metric-label">NET${node.traffic_limit > 0 ? ' ' + escapeHtml(getTrafficLimitLabel(node.traffic_limit_type || 'max')) : ''}</span>
+            <span class="row-metric-value" data-prev="${netTotalText}">${netTotalText}</span>
+          </div>
+          <div class="row-metric-bar net-bar${node.traffic_limit > 0 ? '' : ' unlimited'}">
+            ${(node.traffic_limit > 0) ? `
+            <div class="row-fill net-in${upDim ? ' dimmed' : ''}${upHide ? ' hidden' : ''}" style="width: ${upPct.toFixed(1)}%; left: ${upLeft.toFixed(1)}%; z-index: ${upZIndex}"></div>
+            <div class="row-fill net-out${downDim ? ' dimmed' : ''}${downHide ? ' hidden' : ''}" style="width: ${downPct.toFixed(1)}%; left: ${downLeft.toFixed(1)}%; z-index: ${downZIndex}"></div>
+            ` : `
+            <div class="row-fill net-in" style="width: 0%"></div>
+            <div class="row-fill net-out" style="width: 0%"></div>
+            `}
+          </div>
+        </div>
+      </div>
+      <div class="row-speeds">
+        <div class="row-speed row-up">
+          <span class="row-speed-label"><span class="row-arrow">↑</span></span>
+          <span class="row-speed-value" data-prev="${upSpeedText}">${upSpeedText}</span>
+        </div>
+        <div class="row-speed row-down">
+          <span class="row-speed-label"><span class="row-arrow">↓</span></span>
+          <span class="row-speed-value" data-prev="${downSpeedText}">${downSpeedText}</span>
+        </div>
+      </div>
+    `;
+
+    row.addEventListener('click', (e) => {
+      if (e.target.tagName === 'A') return;
+      openNodeModal(node.uuid);
+    });
+
+    return row;
+  }
+
+  function updateNodeListItem(row, node) {
+    const cpu = node.cpu || 0;
+    const ramPct = node.ram_total ? getPercentage(node.ram, node.ram_total) : 0;
+    const diskPct = node.disk_total ? getPercentage(node.disk, node.disk_total) : 0;
+    const isOnline = node.online !== false && node.name !== undefined;
+
+    row.className = `node-row${isOnline ? '' : ' offline'}`;
+
+    const updateMetric = (key, value, pct, fillClass) => {
+      const valueEl = row.querySelector(`.row-${key} .row-metric-value`);
+      const fillEl = row.querySelector(`.row-${key} .row-fill`);
+      if (valueEl) scrambleTextIfChanged(valueEl, value);
+      if (fillEl) {
+        const newWidth = `${key === 'cpu' ? Math.min(pct, 100) : pct}%`;
+        if (fillEl.style.width !== newWidth) {
+          fillEl.style.width = newWidth;
+          fillEl.classList.remove('high', 'medium', 'low');
+          fillEl.classList.add(fillClass);
+        }
+      }
+    };
+
+    updateMetric('cpu', `${cpu.toFixed(1)}%`, cpu, getMetricClass(cpu));
+    updateMetric('ram', `${formatBytes(node.ram || 0)} / ${formatBytes(node.ram_total || 0)}`, ramPct, getMetricClass(ramPct));
+    updateMetric('disk', `${formatBytes(node.disk || 0)} / ${formatBytes(node.disk_total || 0)}`, diskPct, getMetricClass(diskPct));
+
+    const netTotal = node.traffic_limit > 0 ? getNetTotalByType(node) : (node.net_total_up || 0) + (node.net_total_down || 0);
+    const netTotalText = formatBytes(netTotal) + (node.traffic_limit ? ' / ' + formatBytes(node.traffic_limit) : '');
+    const netValueEl = row.querySelector('.row-net .row-metric-value');
+    if (netValueEl) scrambleTextIfChanged(netValueEl, netTotalText);
+
+    const netBar = row.querySelector('.row-net .net-bar');
+    if (netBar) {
+      const netIn = netBar.querySelector('.net-in');
+      const netOut = netBar.querySelector('.net-out');
+      const { upPct, downPct, upDim, downDim, upHide, downHide, upLeft, downLeft, upZIndex, downZIndex } = getNetBarWidths(node);
+      if (node.traffic_limit > 0) {
+        netBar.classList.remove('unlimited');
+        if (netIn) {
+          netIn.style.width = `${upPct.toFixed(1)}%`;
+          netIn.style.left = `${upLeft.toFixed(1)}%`;
+          netIn.style.zIndex = upZIndex;
+          netIn.classList.toggle('dimmed', upDim);
+          netIn.classList.toggle('hidden', upHide);
+        }
+        if (netOut) {
+          netOut.style.width = `${downPct.toFixed(1)}%`;
+          netOut.style.left = `${downLeft.toFixed(1)}%`;
+          netOut.style.zIndex = downZIndex;
+          netOut.classList.toggle('dimmed', downDim);
+          netOut.classList.toggle('hidden', downHide);
+        }
+      } else {
+        netBar.classList.add('unlimited');
+        if (netIn) netIn.style.width = '0%';
+        if (netOut) netOut.style.width = '0%';
+      }
+    }
+
+    const upValue = row.querySelector('.row-up .row-speed-value');
+    const downValue = row.querySelector('.row-down .row-speed-value');
+    const upSpan = row.querySelector('.row-uptime-value');
+    if (upValue) scrambleTextIfChanged(upValue, isOnline ? formatNetworkSpeed(node.net_out || 0) : '-');
+    if (downValue) scrambleTextIfChanged(downValue, isOnline ? formatNetworkSpeed(node.net_in || 0) : '-');
+    if (upSpan) scrambleTextIfChanged(upSpan, isOnline ? formatUptime(node.uptime) : '-');
+  }
+
   function render() {
     if (state.nodes.size === 0) {
       elements.container.innerHTML = `
@@ -642,14 +801,21 @@
     const sortedNodes = Array.from(state.nodes.values()).sort((a, b) => a.weight - b.weight);
 
     sortedNodes.forEach(node => {
-      elements.container.appendChild(createNodeCard(node));
+      const item = state.viewMode === 'list' ? createNodeListItem(node) : createNodeCard(node);
+      elements.container.appendChild(item);
     });
   }
 
   function updateAllCards() {
     if (state.nodes.size === 0) return;
     state.nodes.forEach((node, uuid) => {
-      updateNodeCard(node);
+      const el = document.querySelector(`[data-uuid="${uuid}"]`);
+      if (!el) return;
+      if (el.classList.contains('node-row')) {
+        updateNodeListItem(el, node);
+      } else {
+        updateNodeCard(node);
+      }
     });
   }
 
@@ -677,8 +843,8 @@
     const nodeCount = state.nodes.size;
     const avgCpu = nodeCount > 0 ? (totalCpu / nodeCount) : 0;
     const avgRam = ramCount > 0 ? (totalRam / ramCount) : 0;
-    const netInText = totalNetIn > 0 ? formatNetworkSpeed(totalNetIn) : '0 B/s';
-    const netOutText = totalNetOut > 0 ? formatNetworkSpeed(totalNetOut) : '0 B/s';
+    const netInText = (totalNetIn > 0 ? formatNetworkSpeed(totalNetIn) : '0 B/s').replace(' ', '\n');
+    const netOutText = (totalNetOut > 0 ? formatNetworkSpeed(totalNetOut) : '0 B/s').replace(' ', '\n');
 
     const nodesText = nodeCount.toString();
     const onlineText = onlineCount.toString();
@@ -725,6 +891,7 @@
       btn.classList.toggle('active', btn.dataset.view === mode);
     });
     elements.container.className = `nodes-container${mode === 'list' ? ' list-view' : ''}`;
+    render();
   }
 
   // --- Modal & Charts ---
@@ -1115,7 +1282,16 @@
       axisTick: { show: false },
       splitLine: { lineStyle: { color: 'rgba(0, 0, 0, 0.12)', type: 'dashed' } }
     },
-    series
+    series,
+    media: [
+      {
+        query: { maxWidth: 600 },
+        option: {
+          legend: { show: false },
+          grid: { top: 12, right: 10, bottom: 28, left: 46 }
+        }
+      }
+    ]
     };
   }
 
@@ -1211,13 +1387,13 @@
     return sorted[idx];
   }
 
-  function renderLatencyTasks(stats) {
+  function renderLatencyTasks(stats, colorByTaskId) {
     const container = document.getElementById('modal-latency-tasks');
     if (!container) return;
     if (!stats.length) { container.innerHTML = ''; return; }
 
     container.innerHTML = stats.map((task, index) => {
-      const color = PING_COLORS[index % PING_COLORS.length];
+      const color = colorByTaskId.get(String(task.id)) || PING_COLORS[index % PING_COLORS.length];
       const lossText = `${task.loss.toFixed(1)}% LOSS`;
       const lossClass = task.loss > 0 ? 'has-loss' : '';
       const latestText = formatPing(task.latest);
@@ -1234,7 +1410,7 @@
         : '';
 
       return `
-        <div class="latency-task-card" style="--task-color: ${color};">
+        <div class="latency-task-card" data-series-index="${index}" style="--task-color: ${color};">
           <div class="latency-task-row">
             <div class="latency-task-strip"></div>
             <div class="latency-task-body">
@@ -1254,12 +1430,51 @@
     }).join('');
   }
 
+  function bindLatencyTaskInteractions(chart) {
+    const container = document.getElementById('modal-latency-tasks');
+    if (!container || !chart) return;
+    const cards = Array.from(container.querySelectorAll('.latency-task-card'));
+    const usesHover = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    let activeIndex = null;
+
+    const setActive = index => {
+      activeIndex = index;
+      container.classList.toggle('has-active', index != null);
+      cards.forEach(card => {
+        card.classList.toggle('is-active', Number(card.dataset.seriesIndex) === index);
+      });
+      chart.dispatchAction({ type: 'downplay', seriesIndex: 'all' });
+      if (index != null) chart.dispatchAction({ type: 'highlight', seriesIndex: index });
+    };
+
+    cards.forEach(card => {
+      const index = Number(card.dataset.seriesIndex);
+      if (usesHover) {
+        card.addEventListener('mouseenter', () => setActive(index));
+        card.addEventListener('mouseleave', () => setActive(null));
+      } else {
+        card.addEventListener('click', () => setActive(activeIndex === index ? null : index));
+      }
+    });
+
+    chart.on('mouseover', params => {
+      if (params.componentType === 'series') setActive(params.seriesIndex);
+    });
+    chart.on('globalout', () => {
+      if (usesHover) setActive(null);
+    });
+  }
+
   function renderLatencyChart(pingRecords, pingTasks) {
     disposeChart('ping');
     if (typeof echarts === 'undefined') return;
 
     const stats = computeTaskStats(pingRecords, pingTasks);
-    renderLatencyTasks(stats);
+    const colorByTaskId = new Map(stats.map((task, index) => [
+      String(task.id),
+      PING_COLORS[index % PING_COLORS.length]
+    ]));
+    renderLatencyTasks(stats, colorByTaskId);
 
     const nameById = {};
     (pingTasks || []).forEach(task => { nameById[task.id] = task.name; });
@@ -1278,14 +1493,21 @@
       pingGroups[taskId].data.push([timestamp, value]);
     });
 
-    const pingSeries = Object.keys(pingGroups).map((taskId, index) => createSeries(
+    const orderedTaskIds = stats
+      .map(task => String(task.id))
+      .filter(taskId => pingGroups[taskId]);
+    Object.keys(pingGroups).forEach(taskId => {
+      if (!orderedTaskIds.includes(taskId)) orderedTaskIds.push(taskId);
+    });
+    const pingSeries = orderedTaskIds.map((taskId, index) => createSeries(
       pingGroups[taskId].name,
-      PING_COLORS[index % PING_COLORS.length],
+      colorByTaskId.get(taskId) || PING_COLORS[index % PING_COLORS.length],
       pingGroups[taskId].data.sort((a, b) => a[0] - b[0]),
       0.08
     ));
     if (pingSeries.length) {
-      mountChart('ping', '#chart-ping', createChartOption(pingSeries, state.modalTimeScale, value => `${Number(value).toFixed(1)} ms`, null, true));
+      mountChart('ping', '#chart-ping', createChartOption(pingSeries, state.modalTimeScale, value => `${Number(value).toFixed(1)} ms`, null, false));
+      bindLatencyTaskInteractions(state.charts.ping);
     }
   }
 

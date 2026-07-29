@@ -1,6 +1,6 @@
 {
   "name": "komari-1999",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Neo-Brutalism themed dashboard for Komari Monitor",
   "scripts": {
     "build": "mkdir -p dist && cp src/index.html src/styles.css src/script.js dist/",
