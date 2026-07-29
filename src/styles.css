@@ -1818,3 +1818,227 @@ h1, h2, h3, h4, h5, h6 {
     max-width: 100%;
   }
 }
+
+/* Authentication Dialog */
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(0, 0, 0, 0.68);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.18s ease, visibility 0s linear 0.18s;
+}
+
+.auth-overlay.active {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+.auth-dialog {
+  position: relative;
+  width: min(100%, 460px);
+  padding: 2rem;
+  background: var(--card-bg);
+  border: var(--border-width) solid var(--black);
+  box-shadow: 12px 12px 0 var(--black);
+  opacity: 0;
+  transform: translateY(16px) scale(0.98);
+  transition: opacity 0.16s ease, transform 0.24s cubic-bezier(0.2, 0.85, 0.25, 1);
+}
+
+.auth-overlay.active .auth-dialog {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.auth-close {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  width: 38px;
+  height: 38px;
+  border: 3px solid var(--black);
+  background: var(--black);
+  color: var(--white);
+  box-shadow: 3px 3px 0 var(--accent);
+  font: 700 1.4rem/1 'Space Grotesk', sans-serif;
+  cursor: pointer;
+}
+
+.auth-heading {
+  padding-right: 2.5rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 5px solid var(--black);
+}
+
+.auth-kicker {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.auth-heading h2 {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.auth-heading p {
+  margin-top: 0.65rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.auth-field {
+  display: grid;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.auth-field span {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.auth-field input {
+  width: 100%;
+  height: 46px;
+  padding: 0 0.75rem;
+  border: 3px solid var(--black);
+  border-radius: 0;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 3px 3px 0 var(--black);
+  font: 700 0.95rem 'Space Grotesk', sans-serif;
+}
+
+.auth-field input:focus {
+  background: var(--white);
+  box-shadow: 5px 5px 0 var(--accent);
+  transform: translate(-2px, -2px);
+}
+
+.auth-message {
+  min-height: 1.1rem;
+  margin: 0.25rem 0 0.65rem;
+  color: var(--accent-red);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.auth-submit,
+.auth-back,
+.auth-oauth a {
+  border: 3px solid var(--black);
+  border-radius: 0;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.auth-submit {
+  width: 100%;
+  min-height: 46px;
+  padding: 0.7rem 1rem;
+  background: var(--accent);
+  color: var(--black);
+  box-shadow: 4px 4px 0 var(--black);
+}
+
+.auth-submit:hover:not(:disabled),
+.auth-oauth a:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0 var(--black);
+}
+
+.auth-submit:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.auth-back {
+  margin-bottom: 1rem;
+  padding: 0.35rem 0.6rem;
+  background: var(--white);
+  color: var(--black);
+  box-shadow: 2px 2px 0 var(--black);
+  font-size: 0.68rem;
+}
+
+.auth-oauth {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.auth-oauth[hidden] {
+  display: none;
+}
+
+.auth-oauth::before,
+.auth-oauth::after {
+  content: '';
+  height: 3px;
+  background: var(--black);
+}
+
+.auth-oauth span {
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.auth-oauth a {
+  grid-column: 1 / -1;
+  padding: 0.65rem;
+  background: var(--black);
+  color: var(--white);
+  box-shadow: 4px 4px 0 var(--accent);
+  text-align: center;
+  font-size: 0.72rem;
+}
+
+@media (max-width: 520px) {
+  .auth-dialog {
+    padding: 1.35rem;
+    box-shadow: 8px 8px 0 var(--black);
+  }
+
+  .auth-heading h2 {
+    font-size: 1.6rem;
+  }
+}
+
+.auth-oauth::before {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.auth-oauth > span {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.auth-oauth::after {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.auth-oauth > a {
+  grid-row: 2;
+}

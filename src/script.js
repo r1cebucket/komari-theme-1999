@@ -14,7 +14,11 @@
     charts: {},
     loadRequestId: 0,
     latencyRequestId: 0,
-    modalCloseId: 0
+    modalCloseId: 0,
+    publicSettings: {},
+    isLoggedIn: false,
+    authForced: false,
+    authNeedsOtp: false
   };
 
   const elements = {
@@ -27,7 +31,20 @@
     statNetOut: document.getElementById('stat-net-out'),
     modal: document.getElementById('node-modal'),
     modalContent: document.getElementById('modal-content'),
-    modalClose: document.getElementById('modal-close')
+    modalClose: document.getElementById('modal-close'),
+    adminButton: document.querySelector('.btn-admin'),
+    authModal: document.getElementById('auth-modal'),
+    authClose: document.getElementById('auth-close'),
+    authForm: document.getElementById('auth-form'),
+    authCredentials: document.getElementById('auth-credentials'),
+    authUsername: document.getElementById('auth-username'),
+    authPassword: document.getElementById('auth-password'),
+    authOtp: document.getElementById('auth-otp'),
+    authOtpCode: document.getElementById('auth-otp-code'),
+    authBack: document.getElementById('auth-back'),
+    authMessage: document.getElementById('auth-message'),
+    authSubmit: document.getElementById('auth-submit'),
+    authOauth: document.getElementById('auth-oauth')
   };
 
   let requestId = 0;
@@ -311,6 +328,7 @@
         const publicSettings = response?.data && typeof response.data === 'object'
           ? response.data
           : response;
+        state.publicSettings = publicSettings || {};
         const siteName = typeof publicSettings?.sitename === 'string' && publicSettings.sitename.trim()
           ? publicSettings.sitename.trim()
           : 'Komari Monitor';
@@ -325,6 +343,120 @@
       }
     } catch (e) {
       console.warn('[Komari Theme] Could not fetch theme settings:', e);
+    }
+  }
+
+  async function fetchAuthState() {
+    try {
+      const me = await rpcCall('public:getMe', {});
+      state.isLoggedIn = me?.logged_in === true;
+    } catch (error) {
+      state.isLoggedIn = false;
+      console.warn('[Komari Theme] Could not determine login state:', error);
+    }
+    updateAuthButton();
+    return state.isLoggedIn;
+  }
+
+  function updateAuthButton() {
+    if (!elements.adminButton) return;
+    const label = elements.adminButton.querySelector('span');
+    if (state.isLoggedIn) {
+      elements.adminButton.hidden = false;
+      elements.adminButton.href = '/admin';
+      elements.adminButton.title = 'Admin Panel';
+      if (label) label.textContent = 'Admin';
+      return;
+    }
+
+    const showLogin = state.publicSettings?.private_site || state.settings.showLoginButton !== false;
+    elements.adminButton.hidden = !showLogin;
+    elements.adminButton.href = '#login';
+    elements.adminButton.title = 'Login';
+    if (label) label.textContent = 'Login';
+  }
+
+  function setAuthStep(needsOtp) {
+    state.authNeedsOtp = needsOtp;
+    elements.authCredentials.hidden = needsOtp;
+    elements.authOtp.hidden = !needsOtp;
+    elements.authSubmit.textContent = needsOtp ? 'VERIFY' : 'LOGIN';
+    elements.authMessage.textContent = '';
+    if (needsOtp) {
+      elements.authOtpCode.value = '';
+      elements.authOtpCode.focus();
+    }
+  }
+
+  function openAuthModal(forced = false) {
+    state.authForced = forced;
+    setAuthStep(false);
+    elements.authClose.hidden = forced;
+    elements.authOauth.hidden = !state.publicSettings?.oauth_enable;
+    elements.authModal.classList.add('active');
+    elements.authModal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    requestAnimationFrame(() => elements.authUsername.focus());
+  }
+
+  function closeAuthModal() {
+    if (state.authForced) return;
+    elements.authModal.classList.remove('active');
+    elements.authModal.setAttribute('aria-hidden', 'true');
+    elements.authForm.reset();
+    elements.authMessage.textContent = '';
+    document.body.style.overflow = '';
+  }
+
+  async function submitLogin(event) {
+    event.preventDefault();
+    const username = elements.authUsername.value.trim();
+    const password = elements.authPassword.value;
+    const otp = elements.authOtpCode.value.trim();
+    if (!username || !password || (state.authNeedsOtp && !/^\d{6}$/.test(otp))) {
+      elements.authMessage.textContent = state.authNeedsOtp ? 'ENTER A VALID 6-DIGIT CODE.' : 'USERNAME AND PASSWORD ARE REQUIRED.';
+      return;
+    }
+
+    elements.authSubmit.disabled = true;
+    elements.authSubmit.textContent = state.authNeedsOtp ? 'VERIFYING...' : 'AUTHENTICATING...';
+    elements.authMessage.textContent = '';
+    const body = { username, password };
+    if (state.authNeedsOtp) body['2fa_code'] = otp;
+
+    try {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body)
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result?.status === 'error') {
+        const message = String(result?.message || `Login failed (${response.status})`);
+        if (!state.authNeedsOtp && /2fa|two.?factor/i.test(message)) {
+          setAuthStep(true);
+          return;
+        }
+        throw new Error(message);
+      }
+
+      await fetchAuthState();
+      if (!state.isLoggedIn) throw new Error('The server did not create a login session.');
+      state.authForced = false;
+      elements.authModal.classList.remove('active');
+      elements.authModal.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+      await fetchNodesAndStatus();
+      startPolling();
+    } catch (error) {
+      elements.authMessage.textContent = state.authNeedsOtp
+        ? 'INVALID VERIFICATION CODE. TRY AGAIN.'
+        : 'LOGIN FAILED. CHECK YOUR CREDENTIALS.';
+      console.error('[Komari Theme] Login failed:', error);
+    } finally {
+      elements.authSubmit.disabled = false;
+      elements.authSubmit.textContent = state.authNeedsOtp ? 'VERIFY' : 'LOGIN';
     }
   }
 
@@ -1564,13 +1696,29 @@
       btn.addEventListener('click', () => setViewMode(btn.dataset.view));
     });
 
+    elements.adminButton.addEventListener('click', event => {
+      if (state.isLoggedIn) return;
+      event.preventDefault();
+      openAuthModal(false);
+    });
+    elements.authClose.addEventListener('click', closeAuthModal);
+    elements.authModal.addEventListener('click', event => {
+      if (event.target === elements.authModal) closeAuthModal();
+    });
+    elements.authForm.addEventListener('submit', submitLogin);
+    elements.authBack.addEventListener('click', () => setAuthStep(false));
+
     elements.modalClose.addEventListener('click', closeNodeModal);
     elements.modal.addEventListener('click', (e) => {
       if (e.target === elements.modal) closeNodeModal();
     });
 
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && elements.modal.classList.contains('active')) {
+      if (event.key !== 'Escape') return;
+      if (elements.authModal.classList.contains('active')) {
+        event.preventDefault();
+        closeAuthModal();
+      } else if (elements.modal.classList.contains('active')) {
         event.preventDefault();
         closeNodeModal();
       }
@@ -1612,10 +1760,15 @@
       });
     }
 
-    fetchPublicSettings().then(() => {
-      fetchNodesAndStatus().then(() => {
-        startPolling();
-      });
+    fetchPublicSettings().then(async () => {
+      await fetchAuthState();
+      if (state.publicSettings?.private_site && !state.isLoggedIn) {
+        stopPolling();
+        openAuthModal(true);
+        return;
+      }
+      await fetchNodesAndStatus();
+      startPolling();
     });
   }
 

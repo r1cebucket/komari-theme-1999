@@ -117,6 +117,42 @@
     </div>
   </div>
 
+  <div class="auth-overlay" id="auth-modal" aria-hidden="true">
+    <div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+      <button class="auth-close" id="auth-close" type="button" aria-label="Close login dialog">&times;</button>
+      <div class="auth-heading">
+        <span class="auth-kicker">SECURE ACCESS //</span>
+        <h2 id="auth-title">LOGIN</h2>
+        <p id="auth-description">Authenticate to access the Komari control panel.</p>
+      </div>
+      <form class="auth-form" id="auth-form">
+        <div id="auth-credentials">
+          <label class="auth-field">
+            <span>USERNAME</span>
+            <input id="auth-username" name="username" type="text" autocomplete="username" required>
+          </label>
+          <label class="auth-field">
+            <span>PASSWORD</span>
+            <input id="auth-password" name="password" type="password" autocomplete="current-password" required>
+          </label>
+        </div>
+        <div class="auth-otp" id="auth-otp" hidden>
+          <button class="auth-back" id="auth-back" type="button">← BACK</button>
+          <label class="auth-field">
+            <span>6-DIGIT AUTHENTICATOR CODE</span>
+            <input id="auth-otp-code" name="otp" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6">
+          </label>
+        </div>
+        <p class="auth-message" id="auth-message" role="alert" aria-live="polite"></p>
+        <button class="auth-submit" id="auth-submit" type="submit">LOGIN</button>
+      </form>
+      <div class="auth-oauth" id="auth-oauth" hidden>
+        <span>OR</span>
+        <a href="/api/oauth">CONTINUE WITH OAUTH2 →</a>
+      </div>
+    </div>
+  </div>
+
   <footer class="footer">
     <div class="footer-content">
       <p class="footer-powered">Powered by <strong>Komari Monitor</strong></p>
