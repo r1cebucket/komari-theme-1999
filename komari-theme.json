@@ -12,7 +12,13 @@
       "key": "accentColor",
       "type": "select",
       "help": "Primary accent color for the theme",
-      "options": ["yellow", "red", "blue", "green", "purple"],
+      "options": [
+        "yellow",
+        "red",
+        "blue",
+        "green",
+        "purple"
+      ],
       "default": "yellow"
     },
     {
@@ -20,7 +26,11 @@
       "key": "cardStyle",
       "type": "select",
       "help": "Border style for cards",
-      "options": ["thick", "thin", "double"],
+      "options": [
+        "thick",
+        "thin",
+        "double"
+      ],
       "default": "thick"
     },
     {
@@ -28,6 +38,13 @@
       "key": "showUptime",
       "type": "switch",
       "help": "Display uptime on node cards",
+      "default": true
+    },
+    {
+      "name": "Show Login Button",
+      "key": "showLoginButton",
+      "type": "switch",
+      "help": "Display a login button when the visitor is not authenticated",
       "default": true
     }
   ]
