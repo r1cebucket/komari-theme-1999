@@ -177,6 +177,76 @@
     return labels[type] || '(max)';
   }
 
+  const LOAD_RANGE_PRESETS = [1, 6, 24, 72, 168, 720];
+  const LATENCY_RANGE_PRESETS = [1, 6, 12, 24];
+
+  // Komari reports how many hours of records it keeps (record_preserve_time).
+  // 0 means "unknown" and disables gating.
+  function getPreserveHours(key) {
+    const raw = Number(state.publicSettings && state.publicSettings[key]);
+    return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
+  }
+
+  function formatRangeLabel(hours) {
+    if (hours === 24) return '24H';
+    if (hours >= 48 && hours % 24 === 0) return `${hours / 24}D`;
+    return `${hours}H`;
+  }
+
+  function getRangeOptions(presets, maxHours) {
+    const options = maxHours > 0 ? presets.filter(hours => hours <= maxHours) : presets.slice();
+    if (maxHours > 0 && !options.includes(maxHours)) options.push(maxHours);
+    options.sort((a, b) => a - b);
+    if (!options.length) options.push(maxHours > 0 ? maxHours : 1);
+    return options;
+  }
+
+  function renderTimescaleButtons(options, activeHours, scopeClass) {
+    return options.map(hours =>
+      `<button class="btn-timescale${hours === activeHours ? ' active' : ''}" data-hours="${hours}">${formatRangeLabel(hours)}</button>`
+    ).join('');
+  }
+
+  function clampToPreserveHours(hours, maxHours) {
+    return maxHours > 0 ? Math.min(hours, maxHours) : hours;
+  }
+
+  // Single source of truth for a time-range tab row: exactly one tab is active,
+  // and no leftover dim/disabled state survives a range switch.
+  function syncTimescaleButtons(scopeSelector, activeHours) {
+    const row = elements.modalContent.querySelector(scopeSelector);
+    if (!row) return;
+    row.querySelectorAll('.btn-timescale').forEach(btn => {
+      btn.classList.toggle('active', Number(btn.dataset.hours) === Number(activeHours));
+      btn.classList.remove('is-dimmed');
+      btn.disabled = false;
+      btn.removeAttribute('aria-disabled');
+      btn.style.opacity = '';
+      btn.style.pointerEvents = '';
+    });
+  }
+
+  // Next traffic/billing cycle reset, derived from created_at + billing_cycle.
+  function getTrafficResetInfo(node) {
+    const cycle = Number(node && node.billing_cycle) || 0;
+    const createdAt = parseRecordTime(node && node.created_at);
+    if (cycle <= 0 || createdAt == null) return null;
+    const cycleMs = cycle * 86400000;
+    const now = Date.now();
+    if (now < createdAt) return null;
+    const periods = Math.floor((now - createdAt) / cycleMs);
+    let nextAt = createdAt + (periods + 1) * cycleMs;
+    while (nextAt <= now) nextAt += cycleMs;
+    const days = Math.max(1, Math.ceil((nextAt - now) / 86400000));
+    return { days, nextAt, text: `RESET IN ${days}D` };
+  }
+
+  // Header caption for the modal NETWORK block: "RESET IN 12D", or '' when unknown.
+  function formatNetResetLabel(node) {
+    const resetInfo = getTrafficResetInfo(node);
+    return resetInfo ? `RESET IN ${resetInfo.days}D` : '';
+  }
+
   function getNetBarWidths(node) {
     const limit = node.traffic_limit || 0;
     const type = node.traffic_limit_type || 'max';
@@ -252,6 +322,36 @@
       upZIndex,
       downZIndex
     };
+  }
+
+  // Traffic quota usage, honoring the node's traffic_limit_type.
+  function getTrafficUsage(node) {
+    const limit = (node && node.traffic_limit) || 0;
+    if (limit <= 0) return null;
+    const type = (node && node.traffic_limit_type) || 'max';
+    const up = (node && node.net_total_up) || 0;
+    const down = (node && node.net_total_down) || 0;
+    let used = Math.max(up, down);
+    if (type === 'sum') used = up + down;
+    else if (type === 'min') used = Math.min(up, down);
+    else if (type === 'up') used = up;
+    else if (type === 'down') used = down;
+    return {
+      limit,
+      used,
+      percent: Math.min(100, Math.round(used / limit * 100)),
+      usedText: formatBytes(used),
+      limitText: formatBytes(limit)
+    };
+  }
+
+  // Share of the consumed traffic per direction (for the SHARE column).
+  function getTrafficShare(node) {
+    const up = (node && node.net_total_up) || 0;
+    const down = (node && node.net_total_down) || 0;
+    const total = up + down;
+    if (total <= 0) return { up: 0, down: 0 };
+    return { up: Math.round(up / total * 100), down: Math.round(down / total * 100) };
   }
 
   function getNetTotalByType(node) {
@@ -489,6 +589,8 @@
             weight: client.weight || 0,
             traffic_limit: client.traffic_limit || 0,
             traffic_limit_type: client.traffic_limit_type || 'max',
+            billing_cycle: client.billing_cycle || 0,
+            created_at: client.created_at || '',
             virtualization: client.virtualization || '',
             kernel_version: client.kernel_version || '',
             gpu_name: client.gpu_name || '',
@@ -565,6 +667,9 @@
     const upTotalText = `↑ ${formatBytes(node.net_total_up || 0)}`;
     const downTotalText = `↓ ${formatBytes(node.net_total_down || 0)}`;
 
+    const resetInfo = getTrafficResetInfo(node);
+    const resetChipHtml = resetInfo ? `<span class="net-reset-chip" data-prev="${resetInfo.text}">${resetInfo.text}</span>` : '';
+
     const card = document.createElement('div');
     card.className = `node-card${isOnline ? '' : ' offline'}`;
     card.dataset.uuid = node.uuid;
@@ -622,6 +727,7 @@
           </div>
           <div class="net-totals">
             <span class="net-total-item" data-prev="${upTotalText}">${upTotalText}</span>
+            ${resetChipHtml}
             <span class="net-total-item" data-prev="${downTotalText}">${downTotalText}</span>
           </div>
         </div>
@@ -744,6 +850,12 @@
       scrambleTextIfChanged(netTotals[1], `↓ ${formatBytes(node.net_total_down || 0)}`);
     }
 
+    const resetChip = existingCard.querySelector('.net-reset-chip');
+    if (resetChip) {
+      const resetInfo = getTrafficResetInfo(node);
+      if (resetInfo) scrambleTextIfChanged(resetChip, resetInfo.text);
+    }
+
     const netUp = existingCard.querySelector('.footer-stat:nth-child(1) span');
     const netDown = existingCard.querySelector('.footer-stat:nth-child(2) span');
     const uptime = existingCard.querySelector('.footer-stat:nth-child(3) span');
@@ -773,6 +885,9 @@
     const downSpeedText = isOnline ? `${formatNetworkSpeed(node.net_in || 0)}` : '-';
     const upSpeedText = isOnline ? `${formatNetworkSpeed(node.net_out || 0)}` : '-';
     const uptimeText = isOnline ? formatUptime(node.uptime) : '-';
+
+    const resetInfo = getTrafficResetInfo(node);
+    const resetChipHtml = resetInfo ? `<span class="net-reset-chip row-net-chip" data-prev="${resetInfo.text}">${resetInfo.text}</span>` : '';
 
     const row = document.createElement('div');
     row.className = `node-row${isOnline ? '' : ' offline'}`;
@@ -818,7 +933,8 @@
             <span class="row-metric-label">NET${node.traffic_limit > 0 ? ' ' + escapeHtml(getTrafficLimitLabel(node.traffic_limit_type || 'max')) : ''}</span>
             <span class="row-metric-value" data-prev="${netTotalText}">${netTotalText}</span>
           </div>
-          <div class="row-metric-bar net-bar${node.traffic_limit > 0 ? '' : ' unlimited'}">
+          <div class="row-net-barline">
+            <div class="row-metric-bar net-bar${node.traffic_limit > 0 ? '' : ' unlimited'}">
             ${(node.traffic_limit > 0) ? `
             <div class="row-fill net-in${upDim ? ' dimmed' : ''}${upHide ? ' hidden' : ''}" style="width: ${upPct.toFixed(1)}%; left: ${upLeft.toFixed(1)}%; z-index: ${upZIndex}"></div>
             <div class="row-fill net-out${downDim ? ' dimmed' : ''}${downHide ? ' hidden' : ''}" style="width: ${downPct.toFixed(1)}%; left: ${downLeft.toFixed(1)}%; z-index: ${downZIndex}"></div>
@@ -826,6 +942,8 @@
             <div class="row-fill net-in" style="width: 0%"></div>
             <div class="row-fill net-out" style="width: 0%"></div>
             `}
+            </div>
+            ${resetChipHtml}
           </div>
         </div>
       </div>
@@ -914,6 +1032,12 @@
     if (upValue) scrambleTextIfChanged(upValue, isOnline ? formatNetworkSpeed(node.net_out || 0) : '-');
     if (downValue) scrambleTextIfChanged(downValue, isOnline ? formatNetworkSpeed(node.net_in || 0) : '-');
     if (upSpan) scrambleTextIfChanged(upSpan, isOnline ? formatUptime(node.uptime) : '-');
+
+    const resetChip = row.querySelector('.row-net-chip');
+    if (resetChip) {
+      const resetInfo = getTrafficResetInfo(node);
+      if (resetInfo) scrambleTextIfChanged(resetChip, resetInfo.text);
+    }
   }
 
   function render() {
@@ -1032,11 +1156,29 @@
     state.modalCloseId++;
     state.activeNodeUuid = uuid;
     state.modalTimeScale = 1; // Reset to 1h on open
+    state.modalLoadTimeScale = 1; // Reset load charts to 1h on open
     const node = state.nodes.get(uuid);
     if (!node) return;
 
+    const loadMaxHours = getPreserveHours('record_preserve_time');
+    const latencyMaxHours = getPreserveHours('ping_record_preserve_time');
+    const loadRangeOptions = getRangeOptions(LOAD_RANGE_PRESETS, loadMaxHours);
+    const latencyRangeOptions = getRangeOptions(LATENCY_RANGE_PRESETS, latencyMaxHours);
+    if (!loadRangeOptions.includes(state.modalLoadTimeScale)) state.modalLoadTimeScale = loadRangeOptions[0];
+    if (!latencyRangeOptions.includes(state.modalTimeScale)) state.modalTimeScale = latencyRangeOptions[0];
+
     const netSpeedDown = formatNetworkSpeed(node.net_in || 0);
     const netSpeedUp = formatNetworkSpeed(node.net_out || 0);
+    const netShare = getTrafficShare(node);
+    const netQuota = getTrafficUsage(node);
+    const netQuotaHtml = netQuota ? `
+          <div class="net-quota">
+            <div class="net-quota-row"><span>QUOTA ${netQuota.usedText} / ${netQuota.limitText}</span><strong id="modal-net-quota-value">${netQuota.percent}%</strong></div>
+            <div class="net-quota-track"><span id="modal-net-quota-fill" class="net-quota-fill ${getMetricClass(netQuota.percent)}" style="width: ${netQuota.percent}%"></span></div>
+          </div>` : '';
+    const netResetLabel = formatNetResetLabel(node);
+    const netBillingDays = Number(node.billing_cycle) || 0;
+    const netBillingLabel = netBillingDays > 0 ? `BILLING ${netBillingDays}D` : '';
     const memoryPercent = getPercentage(node.ram || 0, node.ram_total || 0);
     const swapPercent = getPercentage(node.swap || 0, node.swap_total || 0);
     const diskPercent = getPercentage(node.disk || 0, node.disk_total || 0);
@@ -1102,22 +1244,29 @@
         </div>
 
         <div class="modal-info-section modal-network-section">
-          <h3 class="modal-info-section-title">NETWORK</h3>
-          <div class="network-channels">
-            <div class="network-channel up">
-              <div class="network-channel-direction"><span class="network-channel-arrow">↑</span><span>UPLOAD</span></div>
-              <span class="network-channel-speed">${netSpeedUp}</span>
-              <div class="network-channel-total"><span>TOTAL SENT</span><strong>${formatBytes(node.net_total_up || 0)}</strong></div>
+          <div class="modal-net-head">
+            <h3 class="modal-info-section-title">NETWORK</h3>
+            ${netResetLabel ? `<span class="modal-net-reset" data-prev="${netResetLabel}">${netResetLabel}</span>` : ''}
+          </div>
+          <div class="net-table">
+            <div class="net-row net-row-head"><span>DIR</span><span>RATE</span><span>TOTAL</span><span>SHARE</span></div>
+            <div class="net-row">
+              <span class="net-dir up"><span class="net-dir-arrow">↑</span> UP</span>
+              <span id="modal-net-up-rate">${netSpeedUp}</span>
+              <span id="modal-net-up-total">${formatBytes(node.net_total_up || 0)}</span>
+              <span id="modal-net-up-share">${netShare.up}%</span>
             </div>
-            <div class="network-channel down">
-              <div class="network-channel-direction"><span class="network-channel-arrow">↓</span><span>DOWNLOAD</span></div>
-              <span class="network-channel-speed">${netSpeedDown}</span>
-              <div class="network-channel-total"><span>TOTAL RECEIVED</span><strong>${formatBytes(node.net_total_down || 0)}</strong></div>
+            <div class="net-row">
+              <span class="net-dir down"><span class="net-dir-arrow">↓</span> DOWN</span>
+              <span id="modal-net-down-rate">${netSpeedDown}</span>
+              <span id="modal-net-down-total">${formatBytes(node.net_total_down || 0)}</span>
+              <span id="modal-net-down-share">${netShare.down}%</span>
             </div>
           </div>
-          <div class="network-connections">
-            <span>CONNECTIONS</span>
-            <strong>${node.connections || 0} TCP · ${node.connections_udp || 0} UDP</strong>
+          ${netQuotaHtml}
+          <div class="net-bottom${netQuota ? '' : ' tight'}">
+            <span>TCP <strong id="modal-net-tcp">${node.connections || 0}</strong> · UDP <strong id="modal-net-udp">${node.connections_udp || 0}</strong></span>
+            <span id="modal-net-billing">${netBillingLabel}</span>
           </div>
         </div>
       </div>
@@ -1126,12 +1275,7 @@
         <div class="modal-load-title-container">
           <h3 class="modal-load-title">LOAD OVERVIEW</h3>
           <div class="modal-timescale-selector load-timescale">
-            <button class="btn-timescale active" data-hours="1">1H</button>
-            <button class="btn-timescale" data-hours="6">6H</button>
-            <button class="btn-timescale" data-hours="24">24H</button>
-            <button class="btn-timescale" data-hours="72">3D</button>
-            <button class="btn-timescale" data-hours="168">7D</button>
-            <button class="btn-timescale" data-hours="720">30D</button>
+            ${renderTimescaleButtons(loadRangeOptions, state.modalLoadTimeScale, 'load')}
           </div>
         </div>
         <div class="modal-load-grid">
@@ -1176,10 +1320,7 @@
         <div class="modal-latency-header">
           <h3 class="modal-section-title">LATENCY</h3>
           <div class="modal-timescale-selector latency-timescale">
-            <button class="btn-timescale active" data-hours="1">1H</button>
-            <button class="btn-timescale" data-hours="6">6H</button>
-            <button class="btn-timescale" data-hours="12">12H</button>
-            <button class="btn-timescale" data-hours="24">24H</button>
+            ${renderTimescaleButtons(latencyRangeOptions, state.modalTimeScale, 'latency')}
           </div>
         </div>
         <div class="modal-latency-tasks" id="modal-latency-tasks"></div>
@@ -1190,11 +1331,10 @@
     // Timescale events for LOAD
     elements.modalContent.querySelectorAll('.load-timescale .btn-timescale').forEach(btn => {
       btn.addEventListener('click', () => {
-        const hours = parseInt(btn.dataset.hours);
+        const hours = parseInt(btn.dataset.hours, 10);
         if (state.modalLoadTimeScale === hours) return;
         state.modalLoadTimeScale = hours;
-        elements.modalContent.querySelectorAll('.load-timescale .btn-timescale').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
+        syncTimescaleButtons('.load-timescale', hours);
         refreshLoadCharts(uuid);
       });
     });
@@ -1202,11 +1342,10 @@
     // Timescale events for LATENCY
     elements.modalContent.querySelectorAll('.latency-timescale .btn-timescale').forEach(btn => {
       btn.addEventListener('click', () => {
-        const hours = parseInt(btn.dataset.hours);
+        const hours = parseInt(btn.dataset.hours, 10);
         if (state.modalTimeScale === hours) return;
         state.modalTimeScale = hours;
-        elements.modalContent.querySelectorAll('.latency-timescale .btn-timescale').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
+        syncTimescaleButtons('.latency-timescale', hours);
         refreshLatencyChart(uuid);
       });
     });
@@ -1224,6 +1363,12 @@
     if (!section) return;
 
     section.classList.toggle('is-loading', isLoading);
+    if (!isLoading) {
+      section.querySelectorAll('.btn-timescale').forEach(btn => {
+        btn.style.opacity = '';
+        btn.style.pointerEvents = '';
+      });
+    }
     let overlay = section.querySelector('.chart-loading-overlay');
 
     if (isLoading) {
@@ -1258,13 +1403,13 @@
     setChartLoading('.modal-load-section', true);
 
     try {
-      const records = await fetchLoadHistory(uuid, state.modalLoadTimeScale);
+      const records = await fetchLoadHistory(uuid, clampToPreserveHours(state.modalLoadTimeScale, getPreserveHours('record_preserve_time')));
       const history = records
         .map(record => ({ ...record, timestamp: parseRecordTime(record.time ?? record.updated_at) }))
         .filter(record => record.timestamp != null)
         .sort((a, b) => a.timestamp - b.timestamp);
       if (requestId !== state.loadRequestId || state.activeNodeUuid !== uuid) return;
-      renderLoadCharts(history);
+      renderLoadCharts(history, state.nodes.get(uuid));
     } catch (error) {
       if (requestId === state.loadRequestId) console.warn('Error refreshing load charts:', error);
     } finally {
@@ -1277,7 +1422,7 @@
     setChartLoading('.modal-latency-section', true);
 
     try {
-      const response = await rpcCall('common:getRecords', { uuid, type: 'ping', hours: state.modalTimeScale });
+      const response = await rpcCall('common:getRecords', { uuid, type: 'ping', hours: clampToPreserveHours(state.modalTimeScale, getPreserveHours('ping_record_preserve_time')) });
       if (requestId !== state.latencyRequestId || state.activeNodeUuid !== uuid) return;
       renderLatencyChart(response?.records || [], response?.tasks || []);
     } catch (error) {
@@ -1436,16 +1581,19 @@
   };
 
 
-  function renderLoadCharts(history) {
+  function renderLoadCharts(history, node) {
+    syncTimescaleButtons('.load-timescale', state.modalLoadTimeScale);
     ['cpu', 'ram', 'disk', 'net', 'conn', 'proc'].forEach(disposeChart);
     if (typeof echarts === 'undefined') return;
 
+    const fallbackRamTotal = (node && node.ram_total) || 0;
+    const fallbackDiskTotal = (node && node.disk_total) || 0;
     const toPoint = (record, value) => [record.timestamp, value];
     const netDownData = history.map(h => toPoint(h, h.net_in ?? 0));
     const netUpData = history.map(h => toPoint(h, h.net_out ?? 0));
     const cpuData = history.map(h => toPoint(h, h.cpu ?? 0));
-    const ramData = history.map(h => toPoint(h, h.ram_total > 0 ? (h.ram / h.ram_total * 100) : 0));
-    const diskData = history.map(h => toPoint(h, h.disk_total > 0 ? (h.disk / h.disk_total * 100) : 0));
+    const ramData = history.map(h => { const total = h.ram_total > 0 ? h.ram_total : fallbackRamTotal; return toPoint(h, total > 0 ? (h.ram / total * 100) : 0); });
+    const diskData = history.map(h => { const total = h.disk_total > 0 ? h.disk_total : fallbackDiskTotal; return toPoint(h, total > 0 ? (h.disk / total * 100) : 0); });
     const connData = history.map(h => toPoint(h, h.connections ?? 0));
     const procData = history.map(h => toPoint(h, h.process ?? 0));
     const percentFormatter = value => `${Number(value).toFixed(0)}%`;
@@ -1597,9 +1745,53 @@
     });
   }
 
+  const LATENCY_EMPTY_PIXEL_PATTERN = [1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1];
+
+  // Places the empty state inside #chart-ping and hides the range tabs when the
+  // node has no monitor at all (nothing a range change could reveal).
+  function renderLatencyEmpty(pingTasks, pingRecords) {
+    const container = document.getElementById('chart-ping');
+    if (!container) return;
+    const section = elements.modalContent.querySelector('.modal-latency-section');
+    const hasTasks = Array.isArray(pingTasks) && pingTasks.length > 0;
+    const samples = (pingRecords || []).filter(record => parseRecordTime(record.time ?? record.updated_at) != null);
+    const hasLiveSamples = samples.some(record => typeof record.value === 'number' && record.value >= 0);
+    const noMonitor = !hasTasks && !samples.length;
+
+    let title = 'NO SAMPLES IN THIS RANGE';
+    let hint = 'TRY A WIDER RANGE OR WAIT FOR THE NEXT PING';
+    if (noMonitor) {
+      title = 'NO SIGNAL MONITORED';
+      hint = 'NO PING TASK ASSIGNED TO THIS NODE';
+    } else if (samples.length && !hasLiveSamples) {
+      title = 'ALL PINGS LOST IN THIS RANGE';
+      hint = 'CHECK THE TARGET FROM THE KOMARI SIDE';
+    }
+
+    container.innerHTML = `
+      <div class="latency-empty">
+        <div class="latency-empty-pixels" aria-hidden="true">${LATENCY_EMPTY_PIXEL_PATTERN.map(on => `<span class="latency-empty-pixel${on ? ' on' : ''}"></span>`).join('')}</div>
+        <span class="latency-empty-title">${title}</span>
+        <span class="latency-empty-hint">${hint}</span>
+      </div>
+    `;
+    container.classList.add('is-empty');
+    if (section) section.classList.toggle('no-monitors', noMonitor);
+  }
+
+  function clearLatencyEmpty() {
+    const container = document.getElementById('chart-ping');
+    if (container) {
+      container.classList.remove('is-empty');
+      container.innerHTML = '';
+    }
+    const section = elements.modalContent.querySelector('.modal-latency-section');
+    if (section) section.classList.remove('no-monitors');
+  }
+
   function renderLatencyChart(pingRecords, pingTasks) {
     disposeChart('ping');
-    if (typeof echarts === 'undefined') return;
+    syncTimescaleButtons('.latency-timescale', state.modalTimeScale);
 
     const stats = computeTaskStats(pingRecords, pingTasks);
     const colorByTaskId = new Map(stats.map((task, index) => [
@@ -1636,11 +1828,21 @@
       colorByTaskId.get(taskId) || PING_COLORS[index % PING_COLORS.length],
       pingGroups[taskId].data.sort((a, b) => a[0] - b[0]),
       0.08
-    ));
-    if (pingSeries.length) {
-      mountChart('ping', '#chart-ping', createChartOption(pingSeries, state.modalTimeScale, value => `${Number(value).toFixed(1)} ms`, null, false));
-      bindLatencyTaskInteractions(state.charts.ping);
+    )).filter(series => series.data.some(point => typeof point[1] === 'number' && Number.isFinite(point[1])));
+    if (!pingSeries.length) {
+      renderLatencyEmpty(pingTasks, pingRecords);
+      return;
     }
+    clearLatencyEmpty();
+    if (typeof echarts === 'undefined') return;
+
+    // Sub-millisecond spans need more decimals, otherwise every tick collapses to "0.0 ms".
+    const maxPing = pingSeries.reduce((max, series) => series.data.reduce(
+      (inner, point) => (typeof point[1] === 'number' && Number.isFinite(point[1]) ? Math.max(inner, point[1]) : inner), max), 0);
+    const pingDecimals = maxPing >= 1 ? 1 : maxPing >= 0.1 ? 2 : 3;
+    const pingFormatter = value => `${Number(value).toFixed(pingDecimals)} ms`;
+    mountChart('ping', '#chart-ping', createChartOption(pingSeries, state.modalTimeScale, pingFormatter, null, false));
+    bindLatencyTaskInteractions(state.charts.ping);
   }
 
   function updateModalLiveInfo() {
@@ -1674,6 +1876,45 @@
     if (connVal) scrambleTextIfChanged(connVal, String(node.connections || 0));
     const procVal = document.getElementById('modal-proc-val');
     if (procVal) scrambleTextIfChanged(procVal, String(node.process || 0));
+
+    // Network section (dense table).
+    const netUpRateEl = document.getElementById('modal-net-up-rate');
+    if (netUpRateEl) scrambleTextIfChanged(netUpRateEl, formatNetworkSpeed(node.net_out || 0));
+    const netDownRateEl = document.getElementById('modal-net-down-rate');
+    if (netDownRateEl) scrambleTextIfChanged(netDownRateEl, formatNetworkSpeed(node.net_in || 0));
+    const netUpTotalEl = document.getElementById('modal-net-up-total');
+    if (netUpTotalEl) scrambleTextIfChanged(netUpTotalEl, formatBytes(node.net_total_up || 0));
+    const netDownTotalEl = document.getElementById('modal-net-down-total');
+    if (netDownTotalEl) scrambleTextIfChanged(netDownTotalEl, formatBytes(node.net_total_down || 0));
+    const share = getTrafficShare(node);
+    const netUpShareEl = document.getElementById('modal-net-up-share');
+    if (netUpShareEl) scrambleTextIfChanged(netUpShareEl, `${share.up}%`);
+    const netDownShareEl = document.getElementById('modal-net-down-share');
+    if (netDownShareEl) scrambleTextIfChanged(netDownShareEl, `${share.down}%`);
+    const tcpEl = document.getElementById('modal-net-tcp');
+    if (tcpEl) scrambleTextIfChanged(tcpEl, String(node.connections || 0));
+    const udpEl = document.getElementById('modal-net-udp');
+    if (udpEl) scrambleTextIfChanged(udpEl, String(node.connections_udp || 0));
+    const quotaValueEl = document.getElementById('modal-net-quota-value');
+    const quotaFillEl = document.getElementById('modal-net-quota-fill');
+    if (quotaValueEl && quotaFillEl) {
+      const usage = getTrafficUsage(node);
+      if (usage) {
+        scrambleTextIfChanged(quotaValueEl, `${usage.percent}%`);
+        quotaFillEl.style.width = `${usage.percent}%`;
+        quotaFillEl.className = `net-quota-fill ${getMetricClass(usage.percent)}`;
+      }
+    }
+    const netResetEl = document.querySelector('.modal-net-reset');
+    if (netResetEl) {
+      const resetLabel = formatNetResetLabel(node);
+      if (resetLabel) scrambleTextIfChanged(netResetEl, resetLabel);
+    }
+    const netBillingEl = document.getElementById('modal-net-billing');
+    if (netBillingEl) {
+      const billingDays = Number(node.billing_cycle) || 0;
+      scrambleTextIfChanged(netBillingEl, billingDays > 0 ? `BILLING ${billingDays}D` : '');
+    }
   }
 
   function startPolling() {
