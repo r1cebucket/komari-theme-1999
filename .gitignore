@@ -11,3 +11,6 @@ dist/
 .agents/
 CLAUDE.md
 AGENTS.md
+
+# Local preview screenshots
+.hermes-previews/

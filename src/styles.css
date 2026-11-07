@@ -244,6 +244,19 @@ h1, h2, h3, h4, h5, h6 {
   opacity: 0.9;
 }
 
+/* Offline nodes: bar fills lose their colour so a stale reading cannot read as live. */
+.node-card.offline .metric-fill,
+.node-row.offline .row-fill {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+
+/* Offline nodes: traffic totals and speed arrows drop the value colours too. */
+.node-card.offline .net-total-item,
+.node-row.offline .row-arrow {
+  color: var(--text-muted);
+}
+
 .node-header {
   display: flex;
   justify-content: space-between;
@@ -361,6 +374,7 @@ h1, h2, h3, h4, h5, h6 {
 .net-totals {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   margin-top: 0.25rem;
   font-size: 0.7rem;
   font-weight: 700;
@@ -378,6 +392,27 @@ h1, h2, h3, h4, h5, h6 {
 
 .net-total-item:last-child {
   color: var(--accent-blue);
+}
+
+/* Traffic / billing cycle reset chip — no box, no fill; clamped by black vertical rules */
+.net-reset-chip {
+  display: inline-block;
+  font-family: 'Space Grotesk', 'SF Mono', 'Consolas', 'Monaco', monospace;
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-left: 2px solid var(--black);
+  border-right: 2px solid var(--black);
+  padding: 0 0.45rem;
+  line-height: 1;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+  align-self: center;
 }
 
 .metric-fill.net-in {
@@ -610,11 +645,10 @@ h1, h2, h3, h4, h5, h6 {
     [cpu] minmax(95px, 1fr)
     [ram] minmax(95px, 1fr)
     [disk] minmax(95px, 1fr)
-    [net] minmax(110px, 1.1fr)
-    [up] minmax(82px, 0.85fr)
-    [down] minmax(82px, 0.85fr)
+    [net] minmax(178px, 1.4fr)
+    [speeds] minmax(92px, 0.62fr)
     [uptime] minmax(68px, 0.7fr);
-  grid-template-areas: "status name cpu ram disk net up down uptime";
+  grid-template-areas: "status name cpu ram disk net speeds uptime";
   align-items: stretch;
   gap: 0;
   padding: 0.55rem 0.85rem;
@@ -626,9 +660,12 @@ h1, h2, h3, h4, h5, h6 {
      actually scrolls. Without this, long node names in the 1fr name track
      inflate the row past the container and the layout breaks; with a fixed
      min-width the row always overflows instead of silently clipping.
-     Sum of track min widths is ~791px (status 24 + name 140 + cpu/ram/disk 95 + net 110 + up/down 82 + uptime 68);
-     row padding is 0.85rem × 2 ≈ 27px so total min-width must be ≥ 818px to keep grid content inside row box.
-     Otherwise border-top + OFFLINE dotted bg stop short of the row right edge. */
+     Sum of track min widths is ~787px (status 24 + name 140 + cpu/ram/disk 95×3 + net 178 + speeds 92 + uptime 68);
+     row padding is 0.85rem × 2 ≈ 27px so total min-width must be ≥ 814px to keep grid content inside row box.
+     Otherwise border-top + OFFLINE dotted bg stop short of the row right edge.
+     (up/down share one 92px `speeds` cell with no internal divider; the track
+     min was reduced from 156px to 92px when the two rates were stacked on two
+     lines, and min-width follows it down to 820px.) */
   min-width: 820px;
 }
 
@@ -656,9 +693,26 @@ h1, h2, h3, h4, h5, h6 {
 
 /* Group wrappers collapse into the parent grid so each leaf becomes a column. */
 .row-head,
-.row-metrics,
-.row-speeds {
+.row-metrics {
   display: contents;
+}
+
+/* Up/down speeds share ONE grid cell: a single outer box whose right edge is
+   the divider to UPTIME. The two rates are STACKED on two lines (up on top,
+   down underneath), each line keeping its arrow inline with its own value,
+   and NO internal rule between them.
+   The cell only needs the width of one rate now, so its track minimum is
+   92px (0.45rem × 2 padding + arrow + 0.3rem gap + a "120 KB/s" value). */
+.row-speeds {
+  grid-area: speeds;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.18rem;
+  min-width: 0;
+  border-right: 2px solid var(--black);
+  padding: 0 0.45rem;
 }
 
 .row-status {
@@ -710,10 +764,10 @@ h1, h2, h3, h4, h5, h6 {
 
 .row-metric {
   display: grid;
-  grid-template-rows: auto 8px;
+  grid-template-rows: auto 13px;
   gap: 5px;
   min-width: 0;
-  padding: 0 0.6rem;
+  padding: 0 0.52rem;
   border-right: 2px solid var(--black);
   align-content: center;
 }
@@ -727,7 +781,7 @@ h1, h2, h3, h4, h5, h6 {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 0.4rem;
+  gap: 0.28rem;
   line-height: 1;
   min-width: 0;
 }
@@ -749,10 +803,32 @@ h1, h2, h3, h4, h5, h6 {
   overflow: hidden;
   position: relative;
   min-width: 0;
+  align-self: center;
 }
 
 .row-metric-bar.net-bar {
   position: relative;
+}
+
+/* Net bar + reset label share one line; the bar keeps the remaining width. */
+.row-net-barline {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.row-net-barline .row-metric-bar {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.row-net-chip {
+  flex: 0 0 auto;
+  font-size: 0.55rem;
+  letter-spacing: 0.04em;
+  padding: 0 0.24rem;
+  line-height: 1.2;
 }
 
 .row-metric-bar .row-fill {
@@ -784,18 +860,27 @@ h1, h2, h3, h4, h5, h6 {
   min-width: 0;
 }
 
+/* One rate of the shared speeds cell: arrow + value sit adjacent on a single
+   line. The container stacks the two rates vertically, so each rate needs no
+   padding of its own and no internal divider. */
 .row-speed {
-  display: grid;
-  grid-template-rows: auto 1fr;
-  row-gap: 4px;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
   min-width: 0;
-  padding: 0 0.55rem;
-  border-right: 2px solid var(--black);
-  align-content: center;
+  padding: 0;
+  justify-content: flex-start;
+  border-right: 0;
 }
 
-.row-up { grid-area: up; }
-.row-down { grid-area: down; }
+/* .row-up is the LEFT pair — no internal divider, the container draws the outer one. */
+.row-up {
+  border-right: 0;
+}
+/* .row-down is the RIGHT pair — the container draws the outer divider. */
+.row-down {
+  border-right: 0;
+}
 
 .row-arrow {
   font-family: 'Archivo Black', sans-serif;
@@ -821,15 +906,11 @@ h1, h2, h3, h4, h5, h6 {
   font-variant-numeric: tabular-nums;
   font-size: 0.7rem;
   font-weight: 700;
-  text-align: right;
+  text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1;
-}
-
-.row-down {
-  border-right: 2px solid var(--black);
 }
 
 .row-up .row-arrow { color: var(--accent-green); }
@@ -1021,6 +1102,13 @@ h1, h2, h3, h4, h5, h6 {
     gap: 1.5rem;
   }
 
+  /* clamped label shrinks on small screens */
+  .row-net-chip {
+    font-size: 0.46rem;
+    letter-spacing: 0.04em;
+    padding: 0 0.25rem;
+  }
+
 }
 
 /* Card Style Variations */
@@ -1143,10 +1231,8 @@ h1, h2, h3, h4, h5, h6 {
 .modal-content .info-value,
 .modal-content .storage-meter-value,
 .modal-content .storage-meter-percent,
-.modal-content .network-channel-speed,
-.modal-content .network-channel-total strong,
-.modal-content .network-connections strong,
-.modal-content .load-chart-value {
+.modal-content .load-chart-value,
+.modal-content #modal-net-quota-value {
   font-family: 'Space Grotesk', 'SF Mono', 'Consolas', 'Monaco', monospace;
   font-variant-numeric: tabular-nums;
 }
@@ -1337,79 +1423,136 @@ h1, h2, h3, h4, h5, h6 {
   white-space: nowrap;
 }
 
-.network-channels {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-
-.network-channel {
-  padding: 0.75rem;
-  background: var(--white);
-  border: 2px solid var(--black);
-  box-shadow: 3px 3px 0 var(--black);
-  min-width: 0;
-}
-
-.network-channel.up { border-top: 6px solid var(--accent-green); }
-.network-channel.down { border-top: 6px solid var(--accent-blue); }
-
-.network-channel-direction {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.network-channel-arrow {
-  font-size: 1rem;
-  line-height: 1;
-}
-
-.network-channel.up .network-channel-arrow { color: var(--accent-green); }
-.network-channel.down .network-channel-arrow { color: var(--accent-blue); }
-
-.network-channel-speed {
-  display: block;
-  margin: 0.5rem 0 0.65rem;
-  font-size: 1rem;
-  font-weight: 700;
-  overflow-wrap: anywhere;
-}
-
-.network-channel-total {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding-top: 0.5rem;
+.net-table {
   border-top: 2px solid var(--black);
-  font-size: 0.6rem;
+}
+
+.net-row {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1.1fr) minmax(0, 1fr) 46px;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.42rem 0;
+  border-bottom: 2px solid var(--black);
+  font-family: 'Space Grotesk', 'SF Mono', 'Consolas', 'Monaco', monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.75rem;
   font-weight: 700;
+}
+
+.net-row-head {
+  padding: 0.3rem 0;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
   color: var(--text-muted);
 }
 
-.network-channel-total strong {
-  color: var(--black);
+.net-row span:not(:first-child) {
   text-align: right;
 }
 
-.network-connections {
+.net-dir {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  color: var(--black);
+}
+
+.net-dir-arrow { color: var(--black); }
+.net-dir.up .net-dir-arrow { color: var(--accent-green); }
+.net-dir.down .net-dir-arrow { color: var(--accent-blue); }
+
+.net-quota {
+  margin: 0.7rem 0 0.6rem;
+}
+
+.net-quota-row {
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
-  margin-top: 0.9rem;
-  padding-top: 0.65rem;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.net-quota-row strong {
+  font-family: 'Space Grotesk', 'SF Mono', 'Consolas', 'Monaco', monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.75rem;
+}
+
+.net-quota-track {
+  height: 14px;
+  margin-top: 0.35rem;
+  background: var(--white);
+  border: 2px solid var(--black);
+  overflow: hidden;
+}
+
+.net-quota-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent-green);
+}
+
+.net-quota-fill.low { background: var(--accent-green); }
+.net-quota-fill.medium { background: var(--accent-yellow); }
+.net-quota-fill.high { background: var(--accent-red); }
+
+.modal-net-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.modal-net-head .modal-info-section-title {
+  margin-bottom: 0;
+}
+
+.modal-net-reset {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.net-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 0.25rem;
+  gap: 0.6rem;
+  padding-top: 0.55rem;
   border-top: 2px solid var(--black);
   font-size: 0.65rem;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
-.network-connections strong {
+.net-bottom.tight { border-top: none; }
+
+.net-bottom strong {
+  font-family: 'Space Grotesk', 'SF Mono', 'Consolas', 'Monaco', monospace;
+  font-variant-numeric: tabular-nums;
   color: var(--black);
-  text-align: right;
+}
+
+@media (max-width: 520px) {
+  .net-row {
+    grid-template-columns: 52px minmax(0, 1.15fr) minmax(0, 1fr) 44px;
+    font-size: 0.72rem;
+  }
 }
 
 .modal-load-title-container {
@@ -1580,6 +1723,12 @@ h1, h2, h3, h4, h5, h6 {
   opacity: 0.45;
 }
 
+/* A finished load must never leave the tab row dimmed: only an active load may. */
+.modal-chart-section:not(.is-loading) .btn-timescale {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 @keyframes chart-pixel-resolution {
   0%, 12.5%, 87.5%, 100% {
     opacity: 0;
@@ -1636,6 +1785,74 @@ h1, h2, h3, h4, h5, h6 {
   margin-top: 0;
   background: var(--bg);
   border: none;
+}
+
+.modal-latency-section .chart-container.is-empty {
+  min-height: 170px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 1rem;
+  background: var(--bg);
+  border: 2px solid rgba(0, 0, 0, 0.2);
+}
+
+.latency-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  text-align: center;
+}
+
+.latency-empty-pixels {
+  display: grid;
+  grid-template-columns: repeat(5, 8px);
+  grid-template-rows: repeat(5, 8px);
+  gap: 3px;
+  padding: 5px;
+}
+
+.latency-empty-pixel {
+  width: 8px;
+  height: 8px;
+  background: var(--black);
+  opacity: 0.16;
+}
+
+.latency-empty-pixel.on {
+  background: var(--text-muted);
+  opacity: 0.85;
+}
+
+.latency-empty-title {
+  font-family: 'Archivo Black', sans-serif;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--black);
+}
+
+.latency-empty-hint {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.modal-latency-section.no-monitors .modal-timescale-selector {
+  display: none;
+}
+
+@media (max-width: 520px) {
+  .latency-empty-title { font-size: 0.72rem; }
+  .latency-empty-hint { font-size: 0.56rem; }
 }
 
 .modal-latency-tasks {
@@ -1759,49 +1976,69 @@ h1, h2, h3, h4, h5, h6 {
 
 .modal-timescale-selector {
   display: flex;
-  gap: 0.25rem;
-  background: var(--bg);
-  padding: 0.25rem;
+  align-items: flex-end;
+  gap: 0.95rem;
+  padding: 0;
+  background: transparent;
   border: none;
-  box-shadow: 4px 4px 0 var(--black);
+  box-shadow: none;
 }
 
 .btn-timescale {
-  padding: 0.25rem 0.6rem;
-  background: var(--white);
-  border: 2px solid var(--black);
+  position: relative;
+  padding: 0.25rem 0.1rem 0.5rem;
+  background: transparent;
+  border: none;
   font-family: 'Space Grotesk', sans-serif;
   font-weight: 700;
   font-size: 0.7rem;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+  color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.1s ease;
+  transition: color 0.1s ease;
 }
 
 .btn-timescale:hover {
-  background: var(--accent-yellow);
+  background: transparent;
+  color: var(--black);
+}
+
+.btn-timescale:focus-visible {
+  outline: 2px solid var(--black);
+  outline-offset: 2px;
 }
 
 .btn-timescale.active {
+  background: transparent;
+  color: var(--black);
+}
+
+.btn-timescale.active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 4px;
   background: var(--black);
-  color: var(--white);
+}
+
+/* Sit the tab rail on the section rule instead of floating above it. */
+.modal-load-title-container .modal-timescale-selector,
+.modal-latency-header .modal-timescale-selector {
+  margin-bottom: -0.5rem;
 }
 
 @media (max-width: 520px) {
-  .storage-meter-header,
-  .network-connections {
+  .storage-meter-header {
     align-items: flex-start;
     flex-direction: column;
     gap: 0.25rem;
   }
 
-  .storage-meter-value,
-  .network-connections strong {
+  .storage-meter-value {
     text-align: left;
-  }
-
-  .network-channels {
-    grid-template-columns: 1fr;
   }
 }
 
@@ -1825,6 +2062,7 @@ h1, h2, h3, h4, h5, h6 {
   .modal-timescale-selector {
     flex-wrap: wrap;
     max-width: 100%;
+    gap: 0.8rem;
   }
 }
 
