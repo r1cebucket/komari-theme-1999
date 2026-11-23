@@ -51,6 +51,13 @@
 
   const PING_COLORS = ['#FF3333', '#00A896', '#9B5DE5', '#0066FF', '#F59E0B', '#EC4899', '#10B981', '#F97316'];
 
+  // Single source of truth for "is this node reachable?".
+  // Both render paths (initial render and the 3s poll) plus the modal badge
+  // must use this, otherwise the lamp and the badge disagree with the data.
+  function isNodeOnline(node) {
+    return node.online !== false && node.name !== undefined;
+  }
+
   // Helper: only scramble changed characters
   function scrambleTextIfChanged(element, finalText) {
     const prevText = element.dataset.prev || '';
@@ -226,25 +233,40 @@
     });
   }
 
-  // Next traffic/billing cycle reset, derived from created_at + billing_cycle.
-  function getTrafficResetInfo(node) {
-    const cycle = Number(node && node.billing_cycle) || 0;
-    const createdAt = parseRecordTime(node && node.created_at);
-    if (cycle <= 0 || createdAt == null) return null;
-    const cycleMs = cycle * 86400000;
-    const now = Date.now();
-    if (now < createdAt) return null;
-    const periods = Math.floor((now - createdAt) / cycleMs);
-    let nextAt = createdAt + (periods + 1) * cycleMs;
-    while (nextAt <= now) nextAt += cycleMs;
-    const days = Math.max(1, Math.ceil((nextAt - now) / 86400000));
-    return { days, nextAt, text: `RESET IN ${days}D` };
+  // Node expiry countdown from expired_at (null when the panel has no expiry set).
+  function getExpireInfo(node) {
+    const expiresAt = parseRecordTime(node && node.expired_at);
+    if (expiresAt == null) return null;
+    const msLeft = expiresAt - Date.now();
+    if (msLeft <= 0) return { days: 0, expired: true, text: 'EXPIRED', at: expiresAt };
+    return { days: Math.max(1, Math.ceil(msLeft / 86400000)), expired: false, text: `${Math.max(1, Math.ceil(msLeft / 86400000))}D`, at: expiresAt };
   }
 
-  // Header caption for the modal NETWORK block: "RESET IN 12D", or '' when unknown.
-  function formatNetResetLabel(node) {
-    const resetInfo = getTrafficResetInfo(node);
-    return resetInfo ? `RESET IN ${resetInfo.days}D` : '';
+  // Single source of truth for the expiry wording: the label is always
+  // "EXPIRE IN" and the value is always info.text ("12D" while counting down,
+  // "EXPIRED" once lapsed) — the label is dropped when lapsed so the word
+  // never doubles up as "EXPIRE IN EXPIRED".
+  const EXPIRE_LABEL = 'EXPIRE IN';
+
+  // Expire segment of the grid card footer: value on top, label underneath.
+  // Built as a DOM node so the poll path can add or drop the whole segment
+  // when a node gains or loses an expiry date.
+  function buildExpireFooterCell(expireInfo) {
+    const cell = document.createElement('div');
+    cell.className = `footer-stat footer-stat-expire-cell${expireInfo.expired ? ' is-expired' : ''}`;
+
+    const value = document.createElement('span');
+    value.className = 'footer-stat-value footer-stat-expire-value';
+    value.dataset.prev = expireInfo.text;
+    value.textContent = expireInfo.text;
+
+    const label = document.createElement('div');
+    label.className = `footer-stat-label footer-stat-expire-label${expireInfo.expired ? ' is-hidden' : ''}`;
+    label.textContent = EXPIRE_LABEL;
+
+    cell.appendChild(value);
+    cell.appendChild(label);
+    return cell;
   }
 
   function getNetBarWidths(node) {
@@ -591,6 +613,7 @@
             traffic_limit_type: client.traffic_limit_type || 'max',
             billing_cycle: client.billing_cycle || 0,
             created_at: client.created_at || '',
+            expired_at: client.expired_at || null,
             virtualization: client.virtualization || '',
             kernel_version: client.kernel_version || '',
             gpu_name: client.gpu_name || '',
@@ -649,7 +672,7 @@
     const cpu = node.cpu || 0;
     const ramPct = node.ram_total ? getPercentage(node.ram, node.ram_total) : 0;
     const diskPct = node.disk_total ? getPercentage(node.disk, node.disk_total) : 0;
-    const isOnline = node.online !== false && node.name !== undefined;
+    const isOnline = isNodeOnline(node);
 
     const cpuText = `${cpu.toFixed(1)}%`;
     const ramText = `${formatBytes(node.ram || 0)} / ${formatBytes(node.ram_total || 0)}`;
@@ -659,16 +682,15 @@
     const netTypeLabel = getTrafficLimitLabel(node.traffic_limit_type || 'max');
     const { upPct, downPct, upDim, downDim, upHide, downHide, upLeft, downLeft, upZIndex, downZIndex } = getNetBarWidths(node);
     
-    // speed logic
-    const downSpeedText = isOnline ? `↓ ${formatNetworkSpeed(node.net_in || 0)}` : '↓ -';
-    const upSpeedText = isOnline ? `↑ ${formatNetworkSpeed(node.net_out || 0)}` : '↑ -';
+    // speed logic — the arrows live in their own span, so the text is the bare rate
+    const downSpeedText = isOnline ? formatNetworkSpeed(node.net_in || 0) : '-';
+    const upSpeedText = isOnline ? formatNetworkSpeed(node.net_out || 0) : '-';
     
     const uptimeText = isOnline ? formatUptime(node.uptime) : '-';
     const upTotalText = `↑ ${formatBytes(node.net_total_up || 0)}`;
     const downTotalText = `↓ ${formatBytes(node.net_total_down || 0)}`;
 
-    const resetInfo = getTrafficResetInfo(node);
-    const resetChipHtml = resetInfo ? `<span class="net-reset-chip" data-prev="${resetInfo.text}">${resetInfo.text}</span>` : '';
+    const expireInfo = getExpireInfo(node);
 
     const card = document.createElement('div');
     card.className = `node-card${isOnline ? '' : ' offline'}`;
@@ -727,24 +749,29 @@
           </div>
           <div class="net-totals">
             <span class="net-total-item" data-prev="${upTotalText}">${upTotalText}</span>
-            ${resetChipHtml}
             <span class="net-total-item" data-prev="${downTotalText}">${downTotalText}</span>
           </div>
         </div>
       </div>
       <div class="node-footer">
-        <div class="footer-stat">
-          <span data-prev="${upSpeedText}">${upSpeedText}</span>
-          UP SPEED
+        <div class="footer-stat footer-stat-speeds">
+          <div class="footer-speed footer-speed-up">
+            <span class="footer-speed-arrow">↑</span>
+            <span class="footer-speed-value" data-prev="${upSpeedText}">${upSpeedText}</span>
+          </div>
+          <div class="footer-speed footer-speed-down">
+            <span class="footer-speed-arrow">↓</span>
+            <span class="footer-speed-value" data-prev="${downSpeedText}">${downSpeedText}</span>
+          </div>
         </div>
-        <div class="footer-stat">
-          <span data-prev="${downSpeedText}">${downSpeedText}</span>
-          DOWN SPEED
+        <div class="footer-stat footer-stat-uptime">
+          <span class="footer-stat-value" data-prev="${uptimeText}">${uptimeText}</span>
+          <div class="footer-stat-label">UPTIME</div>
         </div>
-        <div class="footer-stat">
-          <span data-prev="${uptimeText}">${uptimeText}</span>
-          UPTIME
-        </div>
+        ${expireInfo ? `<div class="footer-stat footer-stat-expire-cell${expireInfo.expired ? ' is-expired' : ''}">
+          <span class="footer-stat-value footer-stat-expire-value" data-prev="${expireInfo.text}">${expireInfo.text}</span>
+          <div class="footer-stat-label footer-stat-expire-label${expireInfo.expired ? ' is-hidden' : ''}">${EXPIRE_LABEL}</div>
+        </div>` : ''}
       </div>
     `;
 
@@ -756,6 +783,24 @@
     return card;
   }
 
+  // The grid card interpolates its identity lines without escaping, so the
+  // poll path has to write the raw value the same way. `data-prev` keeps the
+  // comparison stable even when the raw value contains markup.
+  function setRawTextIfChanged(el, value) {
+    if (!el) return;
+    if (el.dataset.prev === value) return;
+    if (el.textContent !== value) el.innerHTML = value;
+    el.dataset.prev = value;
+  }
+
+  // The list row escapes its identity lines, so the poll path has to write the
+  // escaped markup the same way, again only when the text really changed.
+  function setEscapedTextIfChanged(el, rawText, html) {
+    if (!el) return;
+    if (el.textContent === rawText) return;
+    el.innerHTML = html;
+  }
+
   function updateNodeCard(node) {
     const existingCard = document.querySelector(`[data-uuid="${node.uuid}"]`);
     if (!existingCard) return;
@@ -763,9 +808,19 @@
     const cpu = node.cpu || 0;
     const ramPct = node.ram_total ? getPercentage(node.ram, node.ram_total) : 0;
     const diskPct = node.disk_total ? getPercentage(node.disk, node.disk_total) : 0;
-    const isOnline = node.online !== false && node.name !== undefined;
+    const isOnline = isNodeOnline(node);
 
     existingCard.className = `node-card${isOnline ? '' : ' offline'}`;
+
+    // The lamp is baked into the markup at render time, so the poll path has
+    // to flip the `offline` class itself or it stays green forever.
+    const statusDot = existingCard.querySelector('.node-status');
+    if (statusDot) statusDot.classList.toggle('offline', !isOnline);
+
+    // The name and info lines are baked into the card markup at render time,
+    // so a rename in the panel stays stale until a reload; refresh them here.
+    setRawTextIfChanged(existingCard.querySelector('.node-name'), node.name || 'Unknown');
+    setRawTextIfChanged(existingCard.querySelector('.node-info'), `${node.os || ''} · ${node.cpu_name || ''}`);
 
     // Update CPU
     const cpuValue = existingCard.querySelector('.metric:nth-child(1) .metric-value');
@@ -850,30 +905,45 @@
       scrambleTextIfChanged(netTotals[1], `↓ ${formatBytes(node.net_total_down || 0)}`);
     }
 
-    const resetChip = existingCard.querySelector('.net-reset-chip');
-    if (resetChip) {
-      const resetInfo = getTrafficResetInfo(node);
-      if (resetInfo) scrambleTextIfChanged(resetChip, resetInfo.text);
-    }
+    const netUp = existingCard.querySelector('.footer-speed-up .footer-speed-value');
+    const netDown = existingCard.querySelector('.footer-speed-down .footer-speed-value');
+    const uptime = existingCard.querySelector('.footer-stat-uptime .footer-stat-value');
 
-    const netUp = existingCard.querySelector('.footer-stat:nth-child(1) span');
-    const netDown = existingCard.querySelector('.footer-stat:nth-child(2) span');
-    const uptime = existingCard.querySelector('.footer-stat:nth-child(3) span');
-    
-    const newDownSpeedText = isOnline ? `↓ ${formatNetworkSpeed(node.net_in || 0)}` : '↓ -';
-    const newUpSpeedText = isOnline ? `↑ ${formatNetworkSpeed(node.net_out || 0)}` : '↑ -';
+    const newDownSpeedText = isOnline ? formatNetworkSpeed(node.net_in || 0) : '-';
+    const newUpSpeedText = isOnline ? formatNetworkSpeed(node.net_out || 0) : '-';
     const newUptimeText = isOnline ? formatUptime(node.uptime) : '-';
 
     if (netUp) scrambleTextIfChanged(netUp, newUpSpeedText);
     if (netDown) scrambleTextIfChanged(netDown, newDownSpeedText);
     if (uptime) scrambleTextIfChanged(uptime, newUptimeText);
+
+    // Expire segment: add or drop the whole cell when the node gains or loses
+    // an expiry date, then refresh the value and re-assert the lapsed state
+    // (red value + hidden "EXPIRE IN" label) on every poll.
+    const info = getExpireInfo(node);
+    const footer = existingCard.querySelector('.node-footer');
+    let expireCell = footer ? footer.querySelector('.footer-stat-expire-cell') : null;
+    if (info && !expireCell) {
+      expireCell = buildExpireFooterCell(info);
+      if (footer) footer.appendChild(expireCell);
+    } else if (!info && expireCell) {
+      expireCell.remove();
+      expireCell = null;
+    }
+    if (expireCell && info) {
+      const expireValue = expireCell.querySelector('.footer-stat-expire-value');
+      if (expireValue) scrambleTextIfChanged(expireValue, info.text);
+      expireCell.classList.toggle('is-expired', info.expired);
+      const expireLabel = expireCell.querySelector('.footer-stat-expire-label');
+      if (expireLabel) expireLabel.classList.toggle('is-hidden', info.expired);
+    }
   }
 
   function createNodeListItem(node) {
     const cpu = node.cpu || 0;
     const ramPct = node.ram_total ? getPercentage(node.ram, node.ram_total) : 0;
     const diskPct = node.disk_total ? getPercentage(node.disk, node.disk_total) : 0;
-    const isOnline = node.online !== false && node.name !== undefined;
+    const isOnline = isNodeOnline(node);
 
     const cpuText = `${cpu.toFixed(1)}%`;
     const ramText = `${formatBytes(node.ram || 0)} / ${formatBytes(node.ram_total || 0)}`;
@@ -886,8 +956,7 @@
     const upSpeedText = isOnline ? `${formatNetworkSpeed(node.net_out || 0)}` : '-';
     const uptimeText = isOnline ? formatUptime(node.uptime) : '-';
 
-    const resetInfo = getTrafficResetInfo(node);
-    const resetChipHtml = resetInfo ? `<span class="net-reset-chip row-net-chip" data-prev="${resetInfo.text}">${resetInfo.text}</span>` : '';
+    const expireInfo = getExpireInfo(node);
 
     const row = document.createElement('div');
     row.className = `node-row${isOnline ? '' : ' offline'}`;
@@ -902,8 +971,14 @@
           <div class="row-node-info">${escapeHtml(node.os || '')}${node.cpu_name ? ' · ' + escapeHtml(node.cpu_name) : ''}</div>
         </div>
         <div class="row-uptime">
-          <span class="row-uptime-label">UPTIME</span>
-          <span class="row-uptime-value" data-prev="${uptimeText}">${uptimeText}</span>
+          <div class="row-uptime-row">
+            <span class="row-uptime-label">UPTIME</span>
+            <span class="row-uptime-value" data-prev="${uptimeText}">${uptimeText}</span>
+          </div>
+          ${expireInfo ? `<div class="row-uptime-row${expireInfo.expired ? ' is-expired-row' : ''}">
+            <span class="row-uptime-label">${EXPIRE_LABEL}</span>
+            <span class="row-expire${expireInfo.expired ? ' is-expired' : ''}" data-prev="${expireInfo.text}">${expireInfo.text}</span>
+          </div>` : ''}
         </div>
       </div>
       <div class="row-metrics">
@@ -943,7 +1018,6 @@
             <div class="row-fill net-out" style="width: 0%"></div>
             `}
             </div>
-            ${resetChipHtml}
           </div>
         </div>
       </div>
@@ -971,9 +1045,27 @@
     const cpu = node.cpu || 0;
     const ramPct = node.ram_total ? getPercentage(node.ram, node.ram_total) : 0;
     const diskPct = node.disk_total ? getPercentage(node.disk, node.disk_total) : 0;
-    const isOnline = node.online !== false && node.name !== undefined;
+    const isOnline = isNodeOnline(node);
 
     row.className = `node-row${isOnline ? '' : ' offline'}`;
+
+    // Same as the card lamp: the row dot is baked at render time, so the poll
+    // path has to toggle `offline` itself to follow the node state.
+    const statusDot = row.querySelector('.row-status');
+    if (statusDot) statusDot.classList.toggle('offline', !isOnline);
+
+    // Same as the card: the name and info lines are baked into the row markup
+    // at render time, so the poll path has to refresh them on a rename.
+    setEscapedTextIfChanged(
+      row.querySelector('.row-node-name'),
+      node.name || 'Unknown',
+      escapeHtml(node.name || 'Unknown')
+    );
+    setEscapedTextIfChanged(
+      row.querySelector('.row-node-info'),
+      `${node.os || ''}${node.cpu_name ? ' · ' + node.cpu_name : ''}`,
+      `${escapeHtml(node.os || '')}${node.cpu_name ? ' · ' + escapeHtml(node.cpu_name) : ''}`
+    );
 
     const updateMetric = (key, value, pct, fillClass) => {
       const valueEl = row.querySelector(`.row-${key} .row-metric-value`);
@@ -1033,10 +1125,15 @@
     if (downValue) scrambleTextIfChanged(downValue, isOnline ? formatNetworkSpeed(node.net_in || 0) : '-');
     if (upSpan) scrambleTextIfChanged(upSpan, isOnline ? formatUptime(node.uptime) : '-');
 
-    const resetChip = row.querySelector('.row-net-chip');
-    if (resetChip) {
-      const resetInfo = getTrafficResetInfo(node);
-      if (resetInfo) scrambleTextIfChanged(resetChip, resetInfo.text);
+    const expireChip = row.querySelector('.row-expire');
+    if (expireChip) {
+      const info = getExpireInfo(node);
+      if (info) {
+        scrambleTextIfChanged(expireChip, info.text);
+        expireChip.classList.toggle('is-expired', info.expired);
+        const expireRow = expireChip.closest('.row-uptime-row');
+        if (expireRow) expireRow.classList.toggle('is-expired-row', info.expired);
+      }
     }
   }
 
@@ -1062,7 +1159,33 @@
     });
   }
 
+  // The order `render()` produces, derived from state only.
+  // Both the render path and the poll path use it, so the on-screen order and
+  // the state order can be compared for drift.
+  function getExpectedNodeOrder() {
+    return Array.from(state.nodes.values())
+      .sort((a, b) => a.weight - b.weight)
+      .map(node => node.uuid);
+  }
+
+  // The uuid order currently on screen, in DOM order.
+  function getRenderedNodeOrder() {
+    return Array.from(elements.container.querySelectorAll('[data-uuid]'))
+      .map(el => el.dataset.uuid);
+  }
+
   function updateAllCards() {
+    // A node can be added, removed or re-weighted while the page stays open;
+    // when the rendered list no longer matches state, rebuild once instead of
+    // leaving a stale card behind (or missing a new one).
+    const expectedOrder = getExpectedNodeOrder();
+    const renderedOrder = getRenderedNodeOrder();
+    if (expectedOrder.length !== renderedOrder.length
+      || expectedOrder.some((uuid, index) => uuid !== renderedOrder[index])) {
+      render();
+      return;
+    }
+
     if (state.nodes.size === 0) return;
     state.nodes.forEach((node, uuid) => {
       const el = document.querySelector(`[data-uuid="${uuid}"]`);
@@ -1176,18 +1299,22 @@
             <div class="net-quota-row"><span>QUOTA ${netQuota.usedText} / ${netQuota.limitText}</span><strong id="modal-net-quota-value">${netQuota.percent}%</strong></div>
             <div class="net-quota-track"><span id="modal-net-quota-fill" class="net-quota-fill ${getMetricClass(netQuota.percent)}" style="width: ${netQuota.percent}%"></span></div>
           </div>` : '';
-    const netResetLabel = formatNetResetLabel(node);
     const netBillingDays = Number(node.billing_cycle) || 0;
     const netBillingLabel = netBillingDays > 0 ? `BILLING ${netBillingDays}D` : '';
+    const expireInfo = getExpireInfo(node);
+    const expireItemHtml = expireInfo
+      ? `<div class="info-item"><span class="info-label">Expire In</span><span class="info-value${expireInfo.expired ? ' is-expired' : ''}" id="modal-expire" data-prev="${expireInfo.text}" title="${new Date(expireInfo.at).toLocaleDateString()}">${expireInfo.text}</span></div>`
+      : '';
     const memoryPercent = getPercentage(node.ram || 0, node.ram_total || 0);
     const swapPercent = getPercentage(node.swap || 0, node.swap_total || 0);
     const diskPercent = getPercentage(node.disk || 0, node.disk_total || 0);
+    const nodeOnline = isNodeOnline(node);
 
     elements.modalContent.innerHTML = `
       <div class="modal-node-header">
         <div class="modal-node-title">
           <h2 class="modal-node-name">${node.name}</h2>
-          <span class="modal-node-status-tag ${node.online ? 'online' : 'offline'}">${node.online ? 'Online' : 'Offline'}</span>
+          <span class="modal-node-status-tag ${nodeOnline ? 'online' : 'offline'}">${nodeOnline ? 'Online' : 'Offline'}</span>
         </div>
         <div class="modal-node-meta">${node.os || ''} · ${node.arch || ''} · ${node.region || ''}</div>
       </div>
@@ -1209,7 +1336,8 @@
             <div class="info-item"><span class="info-label">OS</span><span class="info-value">${node.os || '-'}</span></div>
             <div class="info-item"><span class="info-label">Kernel</span><span class="info-value">${node.kernel_version || '-'}</span></div>
             <div class="info-item"><span class="info-label">Uptime</span><span class="info-value" id="modal-uptime">${formatUptime(node.uptime)}</span></div>
-            <div class="info-item"><span class="info-label">Last Report</span><span class="info-value" id="modal-last-report">${node.last_report ? new Date(node.last_report).toLocaleString() : '-'}</span></div>
+            ${expireItemHtml}
+            <div class="info-item info-item-wide"><span class="info-label">Last Report</span><span class="info-value" id="modal-last-report">${node.last_report ? new Date(node.last_report).toLocaleString() : '-'}</span></div>
           </div>
         </div>
 
@@ -1244,10 +1372,7 @@
         </div>
 
         <div class="modal-info-section modal-network-section">
-          <div class="modal-net-head">
-            <h3 class="modal-info-section-title">NETWORK</h3>
-            ${netResetLabel ? `<span class="modal-net-reset" data-prev="${netResetLabel}">${netResetLabel}</span>` : ''}
-          </div>
+          <h3 class="modal-info-section-title">NETWORK</h3>
           <div class="net-table">
             <div class="net-row net-row-head"><span>DIR</span><span>RATE</span><span>TOTAL</span><span>SHARE</span></div>
             <div class="net-row">
@@ -1848,12 +1973,37 @@
   function updateModalLiveInfo() {
     if (!state.activeNodeUuid) return;
     const node = state.nodes.get(state.activeNodeUuid);
-    if (!node) return;
+    if (!node) {
+      // The node was deleted in the panel while its modal stayed open, so the
+      // poll has to close that stale modal instead of freezing on dead data.
+      closeNodeModal();
+      return;
+    }
 
     const uptimeEl = document.getElementById('modal-uptime');
     if (uptimeEl) {
-      const isOnline = node.online !== false && node.name !== undefined;
+      const isOnline = isNodeOnline(node);
       uptimeEl.textContent = isOnline ? formatUptime(node.uptime) : '-';
+    }
+
+    // The status badge is written once when the modal opens, so every poll has
+    // to refresh it or it goes stale while the modal stays open.
+    const statusTag = elements.modalContent.querySelector('.modal-node-status-tag');
+    if (statusTag) {
+      const isOnline = isNodeOnline(node);
+      statusTag.textContent = isOnline ? 'Online' : 'Offline';
+      statusTag.classList.toggle('online', isOnline);
+      statusTag.classList.toggle('offline', !isOnline);
+    }
+
+    const expireEl = document.getElementById('modal-expire');
+    if (expireEl) {
+      const info = getExpireInfo(node);
+      if (info) {
+        scrambleTextIfChanged(expireEl, info.text);
+        expireEl.classList.toggle('is-expired', info.expired);
+        expireEl.title = new Date(info.at).toLocaleDateString();
+      }
     }
 
     const lastReportEl = document.getElementById('modal-last-report');
@@ -1904,11 +2054,6 @@
         quotaFillEl.style.width = `${usage.percent}%`;
         quotaFillEl.className = `net-quota-fill ${getMetricClass(usage.percent)}`;
       }
-    }
-    const netResetEl = document.querySelector('.modal-net-reset');
-    if (netResetEl) {
-      const resetLabel = formatNetResetLabel(node);
-      if (resetLabel) scrambleTextIfChanged(netResetEl, resetLabel);
     }
     const netBillingEl = document.getElementById('modal-net-billing');
     if (netBillingEl) {
